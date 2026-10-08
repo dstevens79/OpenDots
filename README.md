@@ -11,7 +11,7 @@ OpenDots is a community fork built with [AG-UI](https://docs.ag-ui.com/introduct
 For a self-hosted Ubuntu 24.04 machine, run this once from its terminal:
 
 ```sh
-sudo apt-get update && sudo apt-get install -y ca-certificates git && sudo git clone https://github.com/dstevens79/OpenDots.git /opt/opendots && cd /opt/opendots && sudo bash scripts/install-ubuntu.sh
+sudo apt-get update && sudo apt-get install -y ca-certificates git && sudo git clone --depth 1 --single-branch --branch feat/self-hosted-sse-whisper https://github.com/dstevens79/OpenDots.git /opt/opendots && cd /opt/opendots && sudo bash scripts/install-ubuntu.sh
 ```
 
 The installer offers local-only or LAN access, plus optional machine-level Harnesses, a per-Dot local Chrome workspace, and a local public-page reader. Each runs natively as a separate systemd service in its own install and data folders. No Docker containers are used. Open **http://localhost:4310**, then go to **Settings → Connections → Add a connection**. Enter the endpoint URL and API key for a service you choose, then select it under **Model roles**. For a local model gateway, use its OpenAI-compatible API URL; no provider is preconfigured. Provider fees, if any, are set by that provider. A local model endpoint can keep inference on your network.
