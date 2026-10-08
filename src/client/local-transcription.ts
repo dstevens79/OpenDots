@@ -1,14 +1,20 @@
 import type { AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 
-const MODEL = 'Xenova/whisper-tiny.en';
+const DEFAULT_MODEL = 'Xenova/whisper-tiny.en';
+function selectedModel() {
+  return localStorage.getItem('opendots-whisper-model') || DEFAULT_MODEL;
+}
 let pipelinePromise: Promise<AutomaticSpeechRecognitionPipeline> | undefined;
+let loadedModel = '';
 
 async function transcriber(onProgress: (message: string) => void) {
-  if (!pipelinePromise) {
+  const modelName = selectedModel();
+  if (!pipelinePromise || loadedModel !== modelName) {
+    loadedModel = modelName;
     pipelinePromise = import('@huggingface/transformers')
       .then(async ({ pipeline, env }) => {
         env.useBrowserCache = true;
-        return (await pipeline('automatic-speech-recognition', MODEL, {
+        return (await pipeline('automatic-speech-recognition', modelName, {
           dtype: 'q8',
           progress_callback: (progress: {
             status?: string;
@@ -31,6 +37,7 @@ async function transcriber(onProgress: (message: string) => void) {
       })
       .catch((error: unknown) => {
         pipelinePromise = undefined;
+        loadedModel = '';
         throw error;
       });
   }
@@ -83,4 +90,4 @@ export async function transcribeAudio(
   }
 }
 
-export const localTranscriptionModel = MODEL;
+export const localTranscriptionModel = selectedModel;

@@ -206,6 +206,163 @@ export function createApp({
     else void voice?.resumePending();
     return c.json(settings);
   });
+  app.get('/api/provider-settings', (c) => {
+    const current = platform?.store.providerConfig({
+      kind: 'omniroute',
+      baseUrl: platform.config.baseUrl,
+      model: platform.config.model ?? '',
+      apiKey: platform.config.apiKey,
+      voiceModel: platform.config.voiceModel,
+      voiceKey: platform.config.voiceKey,
+      voiceName: platform.config.voiceName,
+    }) ?? { kind: 'custom' as const, baseUrl: '', model: '' };
+    return c.json({
+      kind: current.kind,
+      baseUrl: current.baseUrl,
+      model: current.model,
+      hasApiKey: !!current.apiKey,
+      voiceModel: current.voiceModel ?? '',
+      hasVoiceKey: !!current.voiceKey,
+      voiceName: current.voiceName ?? 'marin',
+      voiceBaseUrl: current.voiceBaseUrl ?? '',
+      openCodeUrl: current.openCodeUrl ?? '',
+      hasOpenCodePassword: !!current.openCodePassword,
+    });
+  });
+  app.patch('/api/provider-settings', async (c) => {
+    if (!platform)
+      return c.json({ error: 'Live model configuration is unavailable.' }, 503);
+    const parsed = z
+      .object({
+        kind: z.enum(['omniroute', 'hermes', 'opencode', 'custom']).optional(),
+        baseUrl: z.string().trim().max(2048).optional(),
+        model: z.string().trim().max(256).optional(),
+        apiKey: z.string().max(4096).optional(),
+        voiceModel: z.string().trim().max(256).optional(),
+        voiceKey: z.string().max(4096).optional(),
+        voiceName: z.string().trim().max(64).optional(),
+        voiceBaseUrl: z.string().trim().max(2048).optional(),
+        openCodeUrl: z.string().trim().max(2048).optional(),
+        openCodePassword: z.string().max(4096).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Invalid provider settings.' }, 400);
+    if (parsed.data.baseUrl && !/^https?:\/\//i.test(parsed.data.baseUrl))
+      return c.json({ error: 'Use an http:// or https:// endpoint URL.' }, 400);
+    if (
+      parsed.data.voiceBaseUrl &&
+      !/^https?:\/\//i.test(parsed.data.voiceBaseUrl)
+    )
+      return c.json(
+        { error: 'Use an http:// or https:// voice endpoint URL.' },
+        400,
+      );
+    if (
+      parsed.data.openCodeUrl &&
+      !/^https?:\/\//i.test(parsed.data.openCodeUrl)
+    )
+      return c.json(
+        { error: 'Use an http:// or https:// OpenCode server URL.' },
+        400,
+      );
+    const provider = platform.store.updateProviderConfig(parsed.data, {
+      kind: 'omniroute',
+      baseUrl: platform.config.baseUrl,
+      model: platform.config.model ?? '',
+      apiKey: platform.config.apiKey,
+      voiceModel: platform.config.voiceModel,
+      voiceKey: platform.config.voiceKey,
+      voiceName: platform.config.voiceName,
+    });
+    return c.json({
+      kind: provider.kind,
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      hasApiKey: !!provider.apiKey,
+      voiceModel: provider.voiceModel ?? '',
+      hasVoiceKey: !!provider.voiceKey,
+      voiceName: provider.voiceName ?? 'marin',
+      voiceBaseUrl: provider.voiceBaseUrl ?? '',
+      openCodeUrl: provider.openCodeUrl ?? '',
+      hasOpenCodePassword: !!provider.openCodePassword,
+    });
+  });
+  app.post('/api/provider-settings/test', async (c) => {
+    if (!platform)
+      return c.json({ error: 'Live model configuration is unavailable.' }, 503);
+    const request = z
+      .object({
+        target: z.enum(['chat', 'opencode']).default('chat'),
+        baseUrl: z.string().optional(),
+        apiKey: z.string().optional(),
+        openCodeUrl: z.string().optional(),
+        openCodePassword: z.string().optional(),
+      })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!request.success) return c.json({ error: 'Invalid test target.' }, 400);
+    const provider = platform.store.providerConfig({
+      kind: 'omniroute',
+      baseUrl: platform.config.baseUrl,
+      model: platform.config.model ?? '',
+      apiKey: platform.config.apiKey,
+    });
+    const url =
+      request.data.target === 'opencode'
+        ? (request.data.openCodeUrl ?? provider.openCodeUrl)
+        : (request.data.baseUrl ?? provider.baseUrl);
+    const authKey =
+      request.data.target === 'opencode'
+        ? (request.data.openCodePassword ?? provider.openCodePassword)
+        : (request.data.apiKey ?? provider.apiKey);
+    if (!url) return c.json({ error: 'Enter an endpoint URL first.' }, 400);
+    try {
+      const base = url.replace(/\/$/, '');
+      const response = await fetch(
+        request.data.target === 'opencode'
+          ? `${base}/global/health`
+          : `${base}/models`,
+        {
+          headers:
+            request.data.target === 'opencode' && authKey
+              ? {
+                  Authorization: `Basic ${Buffer.from(`opencode:${authKey}`).toString('base64')}`,
+                }
+              : authKey
+                ? { Authorization: `Bearer ${authKey}` }
+                : {},
+          signal: AbortSignal.timeout(8000),
+        },
+      );
+      if (!response.ok)
+        return c.json(
+          { error: `Endpoint returned HTTP ${response.status}.` },
+          502,
+        );
+      const data = (await response.json().catch(() => null)) as {
+        data?: unknown[];
+        healthy?: boolean;
+      } | null;
+      return c.json({
+        ok: true,
+        detail:
+          request.data.target === 'opencode'
+            ? 'OpenCode server is reachable.'
+            : Array.isArray(data?.data)
+              ? `Connected; ${data.data.length} model(s) listed.`
+              : 'Endpoint is reachable.',
+      });
+    } catch {
+      return c.json(
+        {
+          error:
+            'Could not reach the configured endpoint. Check its URL, network access, and authentication.',
+        },
+        502,
+      );
+    }
+  });
   app.post('/api/memories', async (c) => {
     const parsed = z
       .object({ text: z.string().trim().min(1).max(2000) })

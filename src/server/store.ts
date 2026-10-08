@@ -28,6 +28,7 @@ export class Store {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS setup_telemetry (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS provider_config (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, intervalSeconds INTEGER, nextRunAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, error TEXT, lease TEXT, leaseUntil INTEGER);
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, taskId TEXT NOT NULL, status TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER, result TEXT, error TEXT);
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, taskId TEXT NOT NULL, runId TEXT, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
@@ -72,6 +73,45 @@ export class Store {
       .prepare('SELECT value FROM settings WHERE id=1')
       .get() as { value: string };
     return JSON.parse(row.value) as Settings;
+  }
+  providerConfig(fallback?: ProviderConfig): ProviderConfig {
+    const row = this.db
+      .prepare('SELECT value FROM provider_config WHERE id=1')
+      .get() as { value: string } | undefined;
+    return row
+      ? (JSON.parse(row.value) as ProviderConfig)
+      : (fallback ?? { kind: 'custom', baseUrl: '', model: '', apiKey: '' });
+  }
+  updateProviderConfig(
+    patch: Partial<ProviderConfig>,
+    fallback?: ProviderConfig,
+  ): ProviderConfig {
+    const current = this.providerConfig(fallback);
+    const next = {
+      ...current,
+      ...patch,
+      apiKey: patch.apiKey?.trim()
+        ? patch.apiKey.trim()
+        : patch.baseUrl !== undefined && patch.baseUrl !== current.baseUrl
+          ? undefined
+          : current.apiKey,
+      voiceKey: patch.voiceKey?.trim()
+        ? patch.voiceKey.trim()
+        : patch.voiceBaseUrl !== undefined &&
+            patch.voiceBaseUrl !== current.voiceBaseUrl
+          ? undefined
+          : current.voiceKey,
+      openCodePassword: patch.openCodePassword?.trim()
+        ? patch.openCodePassword.trim()
+        : patch.openCodeUrl !== undefined &&
+            patch.openCodeUrl !== current.openCodeUrl
+          ? undefined
+          : current.openCodePassword,
+    };
+    this.db
+      .prepare('INSERT OR REPLACE INTO provider_config VALUES (1, ?)')
+      .run(JSON.stringify(next));
+    return next;
   }
   updateSettings(patch: Partial<Settings>): Settings {
     return this.transaction(() => {
@@ -310,4 +350,17 @@ export class Store {
       this.db.prepare('DELETE FROM memories WHERE id=?').run(id).changes > 0
     );
   }
+}
+
+export interface ProviderConfig {
+  kind: 'omniroute' | 'hermes' | 'opencode' | 'custom';
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  voiceModel?: string;
+  voiceKey?: string;
+  voiceName?: string;
+  voiceBaseUrl?: string;
+  openCodeUrl?: string;
+  openCodePassword?: string;
 }

@@ -4034,6 +4034,33 @@ h3 {
   margin: 18px 0 0;
   padding: 0;
 }
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.settings-tabs button.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.settings-subtabs {
+  margin-top: 8px;
+}
+.modal .field-label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
 .appearance-fields legend {
   margin-bottom: 8px;
   font-size: 12px;

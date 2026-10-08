@@ -96,7 +96,13 @@ export class DotAgent extends AbstractAgent {
           input.threadId,
           dot.id,
         );
-        if (!this.config.apiKey || !this.config.model) {
+        const provider = this.store.providerConfig({
+          kind: 'omniroute',
+          baseUrl: this.config.baseUrl,
+          model: this.config.model ?? '',
+          apiKey: this.config.apiKey,
+        });
+        if (!provider.apiKey || !provider.model || !provider.baseUrl) {
           configurationFailure = true;
           this.setupTelemetry?.capture({
             kind: 'setup_failed',
@@ -300,9 +306,9 @@ export class DotAgent extends AbstractAgent {
           initialSettings.memoryAllowed && dot.memoryAllowed
             ? this.store.memories().map((memory) => memory.text)
             : [];
-        const adapter = openaiCompatibleText(this.config.model, {
-          apiKey: this.config.apiKey,
-          baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',
+        const adapter = openaiCompatibleText(provider.model, {
+          apiKey: provider.apiKey,
+          baseURL: provider.baseUrl,
           api: 'chat-completions',
           maxRetries: 1,
         });

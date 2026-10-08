@@ -30,6 +30,31 @@ describe('durable task lifecycle', () => {
     expect(reopened.settings().name).toBe('Sam');
     reopened.close();
   });
+  it('persists chat and voice provider settings separately from public workspace settings', () => {
+    const { store, path } = fixture();
+    store.updateProviderConfig({
+      kind: 'hermes',
+      baseUrl: 'http://hermes:8642/v1',
+      model: 'local-model',
+      apiKey: 'server-secret',
+      voiceModel: 'realtime-model',
+      voiceKey: 'voice-secret',
+      openCodeUrl: 'http://opencode:4096',
+      openCodePassword: 'opencode-secret',
+    });
+    const reopened = new Store(path);
+    expect(reopened.providerConfig()).toMatchObject({
+      kind: 'hermes',
+      model: 'local-model',
+      voiceModel: 'realtime-model',
+    });
+    expect(JSON.stringify(reopened.settings())).not.toContain('server-secret');
+    expect(JSON.stringify(reopened.settings())).not.toContain('voice-secret');
+    reopened.updateProviderConfig({ baseUrl: 'http://different-host/v1' });
+    expect(reopened.providerConfig().apiKey).toBeUndefined();
+    expect(reopened.providerConfig().voiceKey).toBe('voice-secret');
+    reopened.close();
+  });
   it('claims each due job once even through separate database connections', () => {
     const { store, path } = fixture();
     store.createTask('Research one');

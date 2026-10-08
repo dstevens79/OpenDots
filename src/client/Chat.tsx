@@ -505,7 +505,7 @@ export function Chat({
                 ? 'Stop recording and transcribe locally'
                 : 'Dictate locally'
             }
-            title={`Local Whisper dictation using ${localTranscriptionModel} (model downloads on first use)`}
+            title={`Local Whisper dictation using ${localTranscriptionModel()} (model downloads on first use)`}
             disabled={
               running ||
               paused ||

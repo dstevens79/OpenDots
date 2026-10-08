@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { api, authHeaders } from './api';
 import type { Dot, Memory, State, WorkspaceState } from '../shared/types';
 import { ConnectionsSection } from './ConnectionsSection';
 import {
@@ -62,6 +63,55 @@ export function WorkspaceDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState(themePreference);
+  const [mainTab, setMainTab] = useState<'connectivity' | 'voice' | 'general'>(
+    'connectivity',
+  );
+  const [connectionTab, setConnectionTab] = useState<
+    'omniroute' | 'local' | 'custom'
+  >('omniroute');
+  const [provider, setProvider] = useState({
+    kind: 'omniroute',
+    baseUrl: '',
+    model: '',
+    apiKey: '',
+    hasApiKey: false,
+    voiceModel: '',
+    voiceKey: '',
+    hasVoiceKey: false,
+    voiceName: 'marin',
+    voiceBaseUrl: '',
+    openCodeUrl: '',
+    openCodePassword: '',
+    hasOpenCodePassword: false,
+  });
+  const [whisperModel, setWhisperModel] = useState(
+    () =>
+      localStorage.getItem('opendots-whisper-model') ||
+      'Xenova/whisper-tiny.en',
+  );
+  const [providerNotice, setProviderNotice] = useState('');
+  useEffect(() => {
+    if (dialog.type !== 'settings') return;
+    void api<typeof provider>('/provider-settings')
+      .then((value: typeof provider) => {
+        setProvider((current) => ({
+          ...current,
+          ...value,
+          apiKey: '',
+          voiceKey: '',
+        }));
+        setConnectionTab(
+          value.kind === 'custom'
+            ? 'custom'
+            : value.kind === 'hermes' || value.kind === 'opencode'
+              ? 'local'
+              : 'omniroute',
+        );
+      })
+      .catch(() =>
+        setProviderNotice('Could not load saved provider settings.'),
+      );
+  }, [dialog.type]);
   const container = useRef<HTMLElement>(null);
   useEffect(() => {
     const previous =
@@ -171,8 +221,32 @@ export function WorkspaceDialog({
                 intervalSeconds: Number(interval),
               };
             }
-            if (await mutate(path, method, body)) onClose();
-            else
+            const saved = await mutate(path, method, body);
+            if (saved && dialog.type === 'settings') {
+              const settingsSaved = await mutate(
+                '/provider-settings',
+                'PATCH',
+                {
+                  kind: provider.kind,
+                  baseUrl: provider.baseUrl,
+                  model: provider.model,
+                  ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
+                  voiceModel: provider.voiceModel,
+                  voiceName: provider.voiceName,
+                  voiceBaseUrl: provider.voiceBaseUrl,
+                  ...(provider.voiceKey ? { voiceKey: provider.voiceKey } : {}),
+                  openCodeUrl: provider.openCodeUrl,
+                  ...(provider.openCodePassword
+                    ? { openCodePassword: provider.openCodePassword }
+                    : {}),
+                },
+              );
+              if (settingsSaved) {
+                localStorage.setItem('opendots-whisper-model', whisperModel);
+                onClose();
+              }
+            } else if (saved) onClose();
+            else if (!saved)
               setError('Could not save. Review the workspace error and retry.');
             setBusy(false);
           }}
@@ -370,76 +444,322 @@ export function WorkspaceDialog({
             </>
           )}
           {dialog.type === 'settings' && (
-            <fieldset className="appearance-fields">
-              <legend>Appearance</legend>
-              <div className="segmented" role="radiogroup">
-                {(['system', 'light', 'dark'] as ThemePreference[]).map(
-                  (option) => (
-                    <label key={option}>
-                      <input
-                        type="radio"
-                        name="theme"
-                        value={option}
-                        checked={theme === option}
-                        onChange={() => {
-                          setTheme(option);
-                          setThemePreference(option);
+            <>
+              <nav className="settings-tabs" aria-label="Settings sections">
+                {(['connectivity', 'voice', 'general'] as const).map((tab) => (
+                  <button
+                    type="button"
+                    key={tab}
+                    className={mainTab === tab ? 'active' : ''}
+                    onClick={() => setMainTab(tab)}
+                  >
+                    {tab === 'connectivity'
+                      ? 'Connectivity'
+                      : tab === 'voice'
+                        ? 'Voice'
+                        : 'General'}
+                  </button>
+                ))}
+              </nav>
+              {mainTab === 'connectivity' && (
+                <>
+                  <nav
+                    className="settings-tabs settings-subtabs"
+                    aria-label="Chat providers"
+                  >
+                    {(['omniroute', 'local', 'custom'] as const).map((tab) => (
+                      <button
+                        type="button"
+                        key={tab}
+                        className={connectionTab === tab ? 'active' : ''}
+                        onClick={() => {
+                          setConnectionTab(tab);
+                          setProvider((current) => ({
+                            ...current,
+                            kind:
+                              tab === 'local'
+                                ? 'hermes'
+                                : tab === 'custom'
+                                  ? 'custom'
+                                  : 'omniroute',
+                          }));
                         }}
-                      />
-                      <span>{option[0].toUpperCase() + option.slice(1)}</span>
-                    </label>
-                  ),
-                )}
-              </div>
-              <p className="muted">
-                Saved in this browser. System follows your device.
-              </p>
-            </fieldset>
-          )}
-          {dialog.type === 'settings' && (
-            <div className="config-note">
-              <strong>Service setup</strong>
-              <p>
-                {workspace.setup.missing.length ? (
+                      >
+                        {tab === 'omniroute'
+                          ? 'OmniRoute'
+                          : tab === 'local'
+                            ? 'Local harnesses'
+                            : 'Custom host'}
+                      </button>
+                    ))}
+                  </nav>
+                  {connectionTab === 'local' && (
+                    <p className="muted">
+                      Hermes API provides the local chat model. OpenCode is
+                      configured separately as a local agent harness.
+                    </p>
+                  )}
+                  <label className="field-label">
+                    {connectionTab === 'local'
+                      ? 'Hermes API URL'
+                      : 'Chat endpoint URL'}
+                    <input
+                      value={provider.baseUrl}
+                      placeholder={
+                        connectionTab === 'local'
+                          ? 'http://localhost:8642/v1'
+                          : 'http://localhost:20128/v1'
+                      }
+                      onChange={(e) =>
+                        setProvider({ ...provider, baseUrl: e.target.value })
+                      }
+                    />
+                  </label>
                   <>
-                    Add{' '}
-                    {workspace.setup.missing.map((name, index) => (
-                      <span key={name}>
-                        {index > 0 && ', '}
-                        <code>{name}</code>
-                      </span>
-                    ))}{' '}
-                    to the server environment, then restart.
+                    <label className="field-label">
+                      Chat model
+                      <input
+                        value={provider.model}
+                        placeholder="model name from your endpoint"
+                        onChange={(e) =>
+                          setProvider({ ...provider, model: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="field-label">
+                      API key{' '}
+                      {provider.hasApiKey && !provider.apiKey
+                        ? '(saved; leave blank to keep)'
+                        : ''}
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={provider.apiKey}
+                        onChange={(e) =>
+                          setProvider({ ...provider, apiKey: e.target.value })
+                        }
+                      />
+                    </label>
                   </>
-                ) : (
-                  'Text configuration is present. A successful conversation confirms connectivity.'
-                )}
-              </p>
-              <p>
-                Slack: {workspace.setup.slack.replaceAll('_', ' ')}. Voice:{' '}
-                {workspace.setup.voice
-                  ? 'configuration present'
-                  : 'needs VOICE_API_KEY and VOICE_MODEL'}
-                .
-              </p>
-              <p>
-                Setup and usage metadata is collected by default.{' '}
-                <a
-                  href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP-TELEMETRY.md"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Tracking and opt-out details
-                </a>
-              </p>
-              <a
-                href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP.md"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Template setup guide ↗
-              </a>
-            </div>
+                  {connectionTab === 'local' && (
+                    <>
+                      <label className="field-label">
+                        OpenCode server URL
+                        <input
+                          value={provider.openCodeUrl}
+                          placeholder="http://localhost:4096"
+                          onChange={(e) =>
+                            setProvider({
+                              ...provider,
+                              openCodeUrl: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="field-label">
+                        OpenCode server password{' '}
+                        {provider.hasOpenCodePassword &&
+                        !provider.openCodePassword
+                          ? '(saved; leave blank to keep)'
+                          : ''}
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          value={provider.openCodePassword}
+                          onChange={(e) =>
+                            setProvider({
+                              ...provider,
+                              openCodePassword: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <p className="muted">
+                        OpenCode has a separate session API, so its server check
+                        verifies reachability; it does not route OpenDots chat
+                        through the OpenCode agent.
+                      </p>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={async () => {
+                      setProviderNotice('Checking endpoint…');
+                      try {
+                        const response = await fetch(
+                          '/api/provider-settings/test',
+                          {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              ...authHeaders(),
+                            },
+                            body: JSON.stringify({
+                              target: 'chat',
+                              baseUrl: provider.baseUrl,
+                              apiKey: provider.apiKey,
+                            }),
+                          },
+                        );
+                        const result = await response.json();
+                        setProviderNotice(result.detail || result.error);
+                      } catch {
+                        setProviderNotice('Endpoint check failed.');
+                      }
+                    }}
+                  >
+                    Test chat endpoint
+                  </button>
+                  {connectionTab === 'local' && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={async () => {
+                        setProviderNotice('Checking OpenCode server…');
+                        try {
+                          const response = await fetch(
+                            '/api/provider-settings/test',
+                            {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                ...authHeaders(),
+                              },
+                              body: JSON.stringify({
+                                target: 'opencode',
+                                openCodeUrl: provider.openCodeUrl,
+                                openCodePassword: provider.openCodePassword,
+                              }),
+                            },
+                          );
+                          const result = await response.json();
+                          setProviderNotice(result.detail || result.error);
+                        } catch {
+                          setProviderNotice('OpenCode check failed.');
+                        }
+                      }}
+                    >
+                      Check OpenCode server
+                    </button>
+                  )}
+                  {providerNotice && (
+                    <p className="muted" role="status">
+                      {providerNotice}
+                    </p>
+                  )}
+                </>
+              )}
+              {mainTab === 'voice' && (
+                <>
+                  <strong>Local dictation</strong>
+                  <p className="muted">
+                    Whisper runs in this browser and inserts recognized text
+                    into chat. The model downloads on first use and stays cached
+                    by the browser.
+                  </p>
+                  <label className="field-label">
+                    Whisper model
+                    <select
+                      value={whisperModel}
+                      onChange={(e) => setWhisperModel(e.target.value)}
+                    >
+                      <option value="Xenova/whisper-tiny.en">
+                        Whisper Tiny English (fastest)
+                      </option>
+                      <option value="Xenova/whisper-base.en">
+                        Whisper Base English
+                      </option>
+                      <option value="Xenova/whisper-small.en">
+                        Whisper Small English (more accurate, larger download)
+                      </option>
+                    </select>
+                  </label>
+                  <strong>Live voice calls</strong>
+                  <p className="muted">
+                    Live speech-to-speech uses its own realtime endpoint and
+                    model, separate from chat and local Whisper dictation.
+                  </p>
+                  <label className="field-label">
+                    Realtime voice endpoint
+                    <input
+                      value={provider.voiceBaseUrl}
+                      placeholder="https://api.openai.com/v1"
+                      onChange={(e) =>
+                        setProvider({
+                          ...provider,
+                          voiceBaseUrl: e.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="field-label">
+                    Realtime voice model
+                    <input
+                      value={provider.voiceModel}
+                      placeholder="gpt-realtime"
+                      onChange={(e) =>
+                        setProvider({ ...provider, voiceModel: e.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="field-label">
+                    Voice API key{' '}
+                    {provider.hasVoiceKey && !provider.voiceKey
+                      ? '(saved; leave blank to keep)'
+                      : ''}
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={provider.voiceKey}
+                      onChange={(e) =>
+                        setProvider({ ...provider, voiceKey: e.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="field-label">
+                    Spoken voice
+                    <input
+                      value={provider.voiceName}
+                      onChange={(e) =>
+                        setProvider({ ...provider, voiceName: e.target.value })
+                      }
+                    />
+                  </label>
+                </>
+              )}
+              {mainTab === 'general' && (
+                <>
+                  <fieldset className="appearance-fields">
+                    <legend>Appearance</legend>
+                    <div className="segmented" role="radiogroup">
+                      {(['system', 'light', 'dark'] as ThemePreference[]).map(
+                        (option) => (
+                          <label key={option}>
+                            <input
+                              type="radio"
+                              name="theme"
+                              value={option}
+                              checked={theme === option}
+                              onChange={() => {
+                                setTheme(option);
+                                setThemePreference(option);
+                              }}
+                            />
+                            <span>
+                              {option[0].toUpperCase() + option.slice(1)}
+                            </span>
+                          </label>
+                        ),
+                      )}
+                    </div>
+                    <p className="muted">
+                      Saved in this browser. System follows your device.
+                    </p>
+                  </fieldset>
+                </>
+              )}
+            </>
           )}
           {dialog.type === 'memory' && (
             <p className="muted">

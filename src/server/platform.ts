@@ -192,8 +192,24 @@ export class Platform {
     });
   }
   setup() {
+    const provider = this.store.providerConfig({
+      kind: 'omniroute',
+      baseUrl: this.config.baseUrl,
+      model: this.config.model ?? '',
+      apiKey: this.config.apiKey,
+      voiceModel: this.config.voiceModel,
+      voiceKey: this.config.voiceKey,
+      voiceName: this.config.voiceName,
+    });
     return setupStatus(
-      this.config,
+      {
+        ...this.config,
+        apiKey: provider.kind === 'opencode' ? undefined : provider.apiKey,
+        model: provider.kind === 'opencode' ? undefined : provider.model,
+        baseUrl: provider.baseUrl,
+        voiceKey: provider.voiceKey ?? this.config.voiceKey,
+        voiceModel: provider.voiceModel ?? this.config.voiceModel,
+      },
       this.handler?.channels?.status().overall ?? 'not_configured',
       this.channelStartupFailed,
     );
