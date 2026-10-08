@@ -21,6 +21,7 @@ import { WorkspaceStore } from './workspace.js';
 import { DotAgent } from './dot-agent.js';
 import { runThreadTurn } from './headless.js';
 import { setupStatus, type PlatformConfig } from './platform-config.js';
+import { providerForTurn } from './model-role.js';
 import { validateRuntimeScope } from './runtime-scope.js';
 import { InMemoryAgentRunner } from '@copilotkit/runtime/v2';
 
@@ -189,11 +190,12 @@ export class Platform {
       voiceKey: this.config.voiceKey,
       voiceName: this.config.voiceName,
     });
+    const resident = providerForTurn(provider, false);
     return setupStatus({
       ...this.config,
-      apiKey: provider.kind === 'opencode' ? undefined : provider.apiKey,
-      model: provider.kind === 'opencode' ? undefined : provider.model,
-      baseUrl: provider.baseUrl,
+      apiKey: resident.kind === 'opencode' ? undefined : resident.apiKey,
+      model: resident.kind === 'opencode' ? undefined : resident.model,
+      baseUrl: resident.baseUrl,
       voiceKey: provider.voiceKey ?? this.config.voiceKey,
       voiceModel: provider.voiceModel ?? this.config.voiceModel,
     });

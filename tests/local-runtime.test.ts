@@ -28,3 +28,38 @@ it('uses the local SSE runtime without hosted conversation credentials', async (
     workspace.close();
   }
 });
+
+it('recognizes the selected named resident connection as ready', () => {
+  const store = new Store(':memory:');
+  const workspace = new WorkspaceStore(':memory:', 'owner');
+  try {
+    store.updateProviderConfig({
+      kind: 'custom',
+      baseUrl: '',
+      model: '',
+      apiKey: '',
+      residentConnectionId: 'omniroute',
+      connections: [
+        {
+          id: 'omniroute',
+          name: 'OmniRoute',
+          kind: 'omniroute',
+          baseUrl: 'http://192.168.1.1:20128/v1',
+          model: 'configured-model',
+          apiKey: 'connection-key',
+        },
+      ],
+    });
+    const platform = new Platform(store, workspace, {
+      ...config,
+      apiKey: undefined,
+      model: undefined,
+      baseUrl: '',
+    });
+
+    expect(platform.setup()).toMatchObject({ model: true, missing: [] });
+  } finally {
+    store.close();
+    workspace.close();
+  }
+});
