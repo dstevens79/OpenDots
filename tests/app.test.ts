@@ -164,7 +164,7 @@ describe('API boundaries', () => {
       ).status,
     ).toBe(200);
   });
-  it('unlocks LAN access with a Linux password and an HttpOnly session', async () => {
+  it('unlocks LAN access with an owner password and an HttpOnly session', async () => {
     const store = new Store(':memory:');
     stores.push(store);
     const runner = new Runner(store, config);
@@ -172,9 +172,8 @@ describe('API boundaries', () => {
       store,
       runner,
       config,
-      ownerUsername: 'dstevens',
-      authenticateOwner: async (username, password) =>
-        username === 'dstevens' && password === 'correct-password',
+      ownerPasswordHash: 'installer-hash',
+      authenticateOwner: async (password) => password === 'correct-password',
     });
     expect((await app.request('/api/state')).status).toBe(401);
     const denied = await app.request('/api/auth/login', {

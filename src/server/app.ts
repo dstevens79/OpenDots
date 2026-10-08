@@ -16,8 +16,8 @@ export interface AppOptions {
   runner: Runner;
   config: Config;
   ownerToken?: string;
-  ownerUsername?: string;
-  authenticateOwner?: (username: string, password: string) => Promise<boolean>;
+  ownerPasswordHash?: string;
+  authenticateOwner?: (password: string) => Promise<boolean>;
   origin?: string | string[];
   platform?: Platform;
 }
@@ -26,7 +26,7 @@ export function createApp({
   runner,
   config,
   ownerToken,
-  ownerUsername,
+  ownerPasswordHash,
   authenticateOwner,
   origin,
   platform,
@@ -111,7 +111,11 @@ export function createApp({
       '[::1]',
       ...originHostnames,
     ]);
-    if (!ownerToken && !ownerUsername && !allowedHosts.has(requestUrl.hostname))
+    if (
+      !ownerToken &&
+      !ownerPasswordHash &&
+      !allowedHosts.has(requestUrl.hostname)
+    )
       return c.json({ error: 'Unrecognized host.' }, 403);
     const requestOrigin = c.req.header('origin');
     const allowedOrigins = new Set(origins ?? [new URL(c.req.url).origin]);
@@ -125,10 +129,11 @@ export function createApp({
       '/api/auth/status',
       '/api/auth/logout',
     ].includes(path);
-    if (ownerUsername && !authEndpoint) {
+    if (ownerPasswordHash && !authEndpoint) {
       const session = sessionFromRequest(c.req.raw);
       const bearer = c.req.header('authorization')?.replace(/^Bearer /, '');
       const tokenAccepted =
+        path.startsWith('/api/copilotkit') &&
         !!ownerToken &&
         !!bearer &&
         (() => {
@@ -142,13 +147,13 @@ export function createApp({
       if (!session && !tokenAccepted)
         return c.json(
           {
-            error: ownerUsername
-              ? 'Enter your Linux account password to unlock OpenDots.'
+            error: ownerPasswordHash
+              ? 'Enter your OpenDots password to unlock OpenDots.'
               : 'Enter your owner access token to unlock OpenDots.',
           },
           401,
         );
-    } else if (ownerToken && !ownerUsername && !authEndpoint) {
+    } else if (ownerToken && !ownerPasswordHash && !authEndpoint) {
       const expected = Buffer.from(ownerToken);
       const supplied = Buffer.from(
         c.req.header('authorization')?.replace(/^Bearer /, '') ?? '',
@@ -172,24 +177,21 @@ export function createApp({
   app.get('/api/auth/status', (c) =>
     c.json({
       authenticated: !!sessionFromRequest(c.req.raw),
-      username: ownerUsername,
+      passwordConfigured: !!ownerPasswordHash,
     }),
   );
   app.post('/api/auth/login', async (c) => {
-    if (!ownerUsername || !authenticateOwner)
+    if (!ownerPasswordHash || !authenticateOwner)
       return c.json({ error: 'Password login is not configured.' }, 503);
     const body = z
       .object({ password: z.string().min(1).max(1024) })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!body.success)
-      return c.json({ error: 'Enter your Linux account password.' }, 400);
-    const accepted = await authenticateOwner(ownerUsername, body.data.password);
+      return c.json({ error: 'Enter your OpenDots password.' }, 400);
+    const accepted = await authenticateOwner(body.data.password);
     if (!accepted)
-      return c.json(
-        { error: 'That Linux account password was not accepted.' },
-        401,
-      );
+      return c.json({ error: 'That OpenDots password was not accepted.' }, 401);
     const session = randomBytes(32).toString('hex');
     sessions.set(session, Date.now() + sessionLifetimeSeconds * 1000);
     const secure = new URL(c.req.url).protocol === 'https:' ? '; Secure' : '';

@@ -17,13 +17,13 @@ An endpoint can be a local model gateway, OmniRoute, or another OpenAI-compatibl
 
 ## Home network access
 
-The installer defaults to local-only access. If you choose LAN access, it uses the password of the Linux account that ran the installer with `sudo`. The password is checked through Ubuntu PAM and is never saved by OpenDots. A short-lived, HttpOnly browser session keeps you signed in for 12 hours; the installer also keeps a private internal service token for local agent requests. To change the binding later, edit `.env` in `/opt/opendots` and restart:
+The installer defaults to local-only access. If you choose LAN access, it asks you to choose and confirm an OpenDots password. OpenDots saves only a salted scrypt hash, never the password. A short-lived, HttpOnly browser session keeps you signed in for 12 hours; the installer also keeps a private internal service token for local agent requests. To change the binding later, edit `.env` in `/opt/opendots` and restart:
 
 ```sh
 sudo systemctl restart opendots
 ```
 
-For LAN access, keep `HOST=0.0.0.0`, `OWNER_USERNAME`, and the `/etc/pam.d/opendots` PAM service configured. The native installer handles these settings for you. For a manual Ubuntu install, set `OWNER_USERNAME` to the Linux account whose password should unlock OpenDots, create `/etc/pam.d/opendots` with `@include common-auth` and `@include common-account`, and set a private `RUNTIME_TOKEN` for local agent requests. Install `libpam0g` and Python 3 so password checks can use Ubuntu's account database.
+For LAN access, set `HOST=0.0.0.0`, `OWNER_PASSWORD_HASH`, and a private `RUNTIME_TOKEN`. The native installer handles these settings. For a manual install, create the hash by entering a password into `scripts/hash-password.py` on stdin; do not put the plain password in `.env` or a shell command. The `RUNTIME_TOKEN` is for internal local agent requests and is not the login password.
 
 ## Local computer workspace
 

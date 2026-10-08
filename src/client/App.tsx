@@ -119,7 +119,6 @@ export function App() {
       current.action === action ? current : { ...current, action },
     );
   const [auth, setAuth] = useState('');
-  const [authUsername, setAuthUsername] = useState('');
   const [needsAuth, setNeedsAuth] = useState(false);
   const [dialog, setDialog] = useState<Dialog>();
   const [mobile, setMobile] = useState(false);
@@ -157,12 +156,6 @@ export function App() {
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
   }, [refresh]);
-  useEffect(() => {
-    if (!needsAuth) return;
-    void api<{ username?: string }>('/auth/status')
-      .then((result) => setAuthUsername(result.username ?? ''))
-      .catch(() => setAuthUsername(''));
-  }, [needsAuth]);
   useEffect(() => {
     setCapture(undefined);
     if (!selectedThread) return;
@@ -247,10 +240,7 @@ export function App() {
       <main className="unlock">
         <Mascot />
         <h1>Your own little corner.</h1>
-        <p>
-          Enter the Ubuntu password for{' '}
-          {authUsername || 'the account chosen during installation'}.
-        </p>
+        <p>Enter the OpenDots password you set during installation.</p>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -263,14 +253,14 @@ export function App() {
               setError(
                 err instanceof Error
                   ? err.message
-                  : 'That Linux account password was not accepted.',
+                  : 'That OpenDots password was not accepted.',
               );
             }
           }}
         >
           <input
             type="password"
-            aria-label="Linux account password"
+            aria-label="OpenDots password"
             autoComplete="current-password"
             value={auth}
             onChange={(e) => setAuth(e.target.value)}

@@ -12,18 +12,14 @@ import { resolveAppOrigins } from './app-origin.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { type PlatformConfig } from './platform-config.js';
-import { authenticateLinuxAccount } from './owner-auth.js';
+import { authenticateOwnerPassword } from './owner-auth.js';
 const host = process.env.HOST ?? '127.0.0.1';
 const port = Number(process.env.PORT ?? 4310);
 const ownerToken = process.env.RUNTIME_TOKEN || process.env.OWNER_TOKEN;
-const ownerUsername = process.env.OWNER_USERNAME?.trim();
-if (
-  !['127.0.0.1', '::1', 'localhost'].includes(host) &&
-  (!ownerToken || ownerToken.length < 24) &&
-  !ownerUsername
-)
+const ownerPasswordHash = process.env.OWNER_PASSWORD_HASH;
+if (!['127.0.0.1', '::1', 'localhost'].includes(host) && !ownerPasswordHash)
   throw new Error(
-    'External binding requires an OWNER_USERNAME for Linux password login.',
+    'External binding requires an OWNER_PASSWORD_HASH. Re-run the installer to set a password.',
   );
 const database = process.env.DATABASE_PATH ?? 'data/opendots.sqlite';
 const store = new Store(database);
@@ -97,8 +93,9 @@ const app = createApp({
   ownerToken,
   origin: resolveAppOrigins(process.env.APP_ORIGIN, process.env.NODE_ENV),
   platform,
-  ownerUsername,
-  authenticateOwner: authenticateLinuxAccount,
+  ownerPasswordHash,
+  authenticateOwner: (password) =>
+    authenticateOwnerPassword(password, ownerPasswordHash!),
 });
 app.use('*', async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff');

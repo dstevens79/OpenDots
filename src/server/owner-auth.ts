@@ -1,26 +1,31 @@
-import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+import { scrypt, timingSafeEqual } from 'node:crypto';
 
-const pamHelper = resolve(process.cwd(), 'scripts/authenticate-pam.py');
-
-/** Check a password without saving it or placing it in process arguments. */
-export function authenticateLinuxAccount(
-  username: string,
+/** Check an installer-created scrypt hash without saving the password. */
+export async function authenticateOwnerPassword(
   password: string,
+  encodedHash: string,
 ): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn('python3', [pamHelper, username], {
-      stdio: ['pipe', 'ignore', 'ignore'],
-    });
-    const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);
-    child.once('error', () => {
-      clearTimeout(timeout);
-      resolve(false);
-    });
-    child.once('close', (code) => {
-      clearTimeout(timeout);
-      resolve(code === 0);
-    });
-    child.stdin.end(`${password}\n`);
-  });
+  const [algorithm, cost, saltHex, hashHex, extra] = encodedHash.split('$');
+  if (
+    algorithm !== 'scrypt' ||
+    cost !== '16384' ||
+    !saltHex ||
+    !hashHex ||
+    extra !== undefined ||
+    !/^[0-9a-f]{32}$/.test(saltHex) ||
+    !/^[0-9a-f]{64}$/.test(hashHex)
+  )
+    return false;
+  const salt = Buffer.from(saltHex, 'hex');
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = await new Promise<Buffer>((resolve, reject) =>
+    scrypt(
+      password,
+      salt,
+      32,
+      { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 },
+      (error, derived) => (error ? reject(error) : resolve(derived)),
+    ),
+  );
+  return timingSafeEqual(actual, expected);
 }
