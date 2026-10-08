@@ -50,9 +50,16 @@ if [[ "$install_computer" =~ ^[Yy]$ ]]; then
   install_manager="y"
 fi
 read -r -p "Install the optional local public-page browser reader? [y/N] " install_browser
+configure_ufw="n"
+if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
+  read -r -p "Add a UFW allow rule for OpenDots on TCP port 4310? [y/N] " configure_ufw
+fi
 
 apt-get update
 apt-get install -y ca-certificates curl openssl python3
+if [[ "$configure_ufw" =~ ^[Yy]$ ]] && ! command -v ufw >/dev/null 2>&1; then
+  apt-get install -y ufw
+fi
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
   owner_password_hash="$(printf '%s' "$owner_password" | python3 "$APP_DIR/scripts/hash-password.py")"
   unset owner_password owner_password_confirm
@@ -155,6 +162,15 @@ fi
 systemctl daemon-reload
 systemctl enable opendots.service
 systemctl restart opendots.service
+if [[ "$configure_ufw" =~ ^[Yy]$ ]]; then
+  ufw allow 4310/tcp comment 'OpenDots LAN access'
+  if ufw status | grep -q '^Status: active'; then
+    echo "UFW now allows TCP 4310 for OpenDots."
+  else
+    echo "The UFW rule was added, but UFW is inactive; the rule will apply only if you enable UFW later."
+    echo "UFW was not enabled automatically, so existing remote-access rules are unchanged."
+  fi
+fi
 echo
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
   echo "LAN access is enabled. Sign in with the OpenDots password you set during installation."
