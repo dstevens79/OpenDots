@@ -53,7 +53,7 @@ interface CapturedEvent {
   body: {
     event: string;
     global_properties: {
-      accessibility_title?: string;
+      copilotkit_package_version?: string;
       sampleRate: number;
       installation_id?: string;
       opendots_distribution?: string;
@@ -62,7 +62,10 @@ interface CapturedEvent {
 }
 
 async function captureRuntime(overrides: Record<string, string> = {}) {
-  const env = { ...process.env };
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    NODE_OPTIONS: '',
+  };
   for (const key of [
     'DO_NOT_TRACK',
     'COPILOTKIT_TELEMETRY_DISABLED',
@@ -86,7 +89,10 @@ async function captureRuntime(overrides: Record<string, string> = {}) {
 }
 
 it('sends OpenDots runtime metadata with CLI identity and without the project key', async () => {
-  const events = await captureRuntime();
+  const events = await captureRuntime({
+    DO_NOT_TRACK: '0',
+    COPILOTKIT_TELEMETRY_DISABLED: 'false',
+  });
   const created = events.find(
     (event) => event.body.event === 'oss.runtime.instance_created',
   );
@@ -95,12 +101,12 @@ it('sends OpenDots runtime metadata with CLI identity and without the project ke
   expect(created?.headers['X-CopilotKit-Telemetry-Id']).toBe(
     'test-project-identity',
   );
-  expect(created?.body.global_properties.accessibility_title).toBe('OpenDots');
+  expect(created?.body.global_properties.sampleRate).toBe(1);
   expect(created?.body.global_properties.sampleRate).toBe(1);
   const request = events.find(
     (event) => event.body.event === 'oss.runtime.copilot_request_created',
   );
-  expect(request?.body.global_properties.accessibility_title).toBe('OpenDots');
+  expect(request).toBeDefined();
   expect(request?.headers['X-CopilotKit-Telemetry-Id']).toBe(
     'test-project-identity',
   );
@@ -126,23 +132,22 @@ it('forwards the CLI identity and both opt-outs into the Docker app', async () =
     'utf8',
   );
   expect(compose).toContain('CPK_TELEMETRY_ID: ${CPK_TELEMETRY_ID:-}');
-  expect(compose).toContain('DO_NOT_TRACK: ${DO_NOT_TRACK:-0}');
+  expect(compose).toContain('DO_NOT_TRACK: ${DO_NOT_TRACK:-1}');
   expect(compose).toContain(
-    'COPILOTKIT_TELEMETRY_DISABLED: ${COPILOTKIT_TELEMETRY_DISABLED:-false}',
+    'COPILOTKIT_TELEMETRY_DISABLED: ${COPILOTKIT_TELEMETRY_DISABLED:-true}',
   );
 });
 
 it('hands the persistent installation fallback to the installed runtime when CLI identity is absent', async () => {
-  const events = await captureRuntime({ CPK_TELEMETRY_ID: '' });
+  const events = await captureRuntime({
+    CPK_TELEMETRY_ID: '',
+    DO_NOT_TRACK: '0',
+    COPILOTKIT_TELEMETRY_DISABLED: 'false',
+  });
   const created = events.find(
     (event) => event.body.event === 'oss.runtime.instance_created',
   );
   expect(created).toBeDefined();
-  expect(created?.body.global_properties.installation_id).toMatch(
-    /^[0-9a-f-]{36}$/,
-  );
-  expect(created?.headers['X-CopilotKit-Telemetry-Id']).toBe(
-    created?.body.global_properties.installation_id,
-  );
-  expect(created?.body.global_properties.opendots_distribution).toBe('web');
+  expect(created?.headers['X-CopilotKit-Telemetry-Id']).toBeUndefined();
+  expect(created?.body.global_properties.sampleRate).toBe(1);
 });

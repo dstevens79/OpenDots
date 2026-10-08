@@ -1,4 +1,7 @@
-import { webSearchProvider } from './parallel.js';
+// Self-hosted installs opt out of SDK telemetry unless an operator opts in.
+process.env.DO_NOT_TRACK ??= '1';
+process.env.COPILOTKIT_TELEMETRY_DISABLED ??= 'true';
+const { webSearchProvider } = await import('./parallel.js');
 import { createShutdown } from './shutdown.js';
 import { reportChannelFailure, safeFailure } from './slack-channel.js';
 import { serve } from '@hono/node-server';
@@ -9,11 +12,7 @@ import { createApp } from './app.js';
 import { resolveAppOrigins } from './app-origin.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
-import {
-  intelligenceApiKeyFromEnv,
-  intelligenceWsUrlFromEnv,
-  type PlatformConfig,
-} from './platform-config.js';
+import { type PlatformConfig } from './platform-config.js';
 const host = process.env.HOST ?? '127.0.0.1';
 const port = Number(process.env.PORT ?? 4310);
 const ownerToken = process.env.OWNER_TOKEN;
@@ -31,13 +30,12 @@ const workspace = new WorkspaceStore(
   process.env.OWNER_ID ?? 'opendots-owner',
 );
 const config: PlatformConfig = {
-  intelligenceKey: intelligenceApiKeyFromEnv(process.env),
-  intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,
-  intelligenceWsUrl: intelligenceWsUrlFromEnv(process.env),
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_MODEL,
   baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
-  webSearchProvider: webSearchProvider(process.env.WEB_SEARCH_PROVIDER),
+  webSearchProvider: webSearchProvider(
+    process.env.WEB_SEARCH_PROVIDER ?? 'disabled',
+  ),
   parallelApiKey: process.env.PARALLEL_API_KEY,
   browserUrl: process.env.BROWSER_URL,
   browserSecret: process.env.BROWSER_SECRET,
@@ -76,9 +74,9 @@ const runner = new Runner(
     const threadId = workspace.taskThread(claim.id);
     if (!threadId)
       throw new Error(
-        'This legacy task has no Intelligence conversation. Create a new scheduled task from a conversation.',
+        'This legacy task has no local conversation. Create a new scheduled task from a conversation.',
       );
-    progress('Running this task in its Intelligence conversation.');
+    progress('Running this task in its local conversation.');
     const text = await platform.turn(threadId, claim.prompt, signal, {
       opendotsSource: 'scheduled_task',
     });
@@ -120,6 +118,7 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
       ),
     );
 });
+setInterval(() => platform.persistRuntimeHistory(), 2000).unref();
 const shutdown = createShutdown({
   stopRunner: () => runner.stop(),
   stopPlatform: () => platform.stop(),

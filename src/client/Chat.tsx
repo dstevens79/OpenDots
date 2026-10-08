@@ -25,6 +25,7 @@ import {
   PhoneOff,
   Square,
   X,
+  Mic,
 } from 'lucide-react';
 import {
   ComputerToolCard,
@@ -36,6 +37,10 @@ import { Mascot } from './Mascot';
 import { useVoice } from './useVoice';
 import { CallView } from './CallView';
 import { shouldSubmitComposerOnKeyDown } from './chat-composer';
+import {
+  localTranscriptionModel,
+  transcribeAudio,
+} from './local-transcription';
 
 export function Chat({
   thread,
@@ -94,6 +99,10 @@ export function Chat({
     };
   }, [thread.id, contextAttempt]);
   const [draft, setDraft] = useState('');
+  const [dictating, setDictating] = useState(false);
+  const [dictationStatus, setDictationStatus] = useState('');
+  const recorder = useRef<MediaRecorder | undefined>(undefined);
+  const recorderStream = useRef<MediaStream | undefined>(undefined);
   const [source, setSource] = useState('');
   const [sourceOpen, setSourceOpen] = useState(false);
   const [error, setError] = useState('');
@@ -102,6 +111,74 @@ export function Chat({
   const voice = useVoice(thread.id, onSaved, agent.messages.at(-1)?.id);
   const sent = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
+  useEffect(
+    () => () => {
+      recorder.current?.stop();
+      recorderStream.current?.getTracks().forEach((track) => track.stop());
+    },
+    [],
+  );
+  const toggleDictation = async () => {
+    if (dictating) {
+      recorder.current?.stop();
+      recorderStream.current?.getTracks().forEach((track) => track.stop());
+      recorder.current = undefined;
+      recorderStream.current = undefined;
+      setDictating(false);
+      return;
+    }
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      setError('This browser does not support local microphone dictation.');
+      return;
+    }
+    try {
+      setError('');
+      setDictationStatus('Requesting microphone…');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks: BlobPart[] = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      recorderStream.current = stream;
+      recorder.current = mediaRecorder;
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      mediaRecorder.onerror = () => setError('Microphone recording failed.');
+      mediaRecorder.onstop = () => {
+        void transcribeAudio(
+          new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' }),
+          setDictationStatus,
+        )
+          .then((text) => {
+            if (text)
+              setDraft((current) =>
+                current ? `${current.trimEnd()} ${text}` : text,
+              );
+            setDictationStatus(text ? '' : 'No speech was recognized.');
+          })
+          .catch((reason: unknown) =>
+            setError(
+              reason instanceof Error
+                ? reason.message
+                : 'Local transcription failed.',
+            ),
+          )
+          .finally(() => setDictating(false));
+      };
+      mediaRecorder.start();
+      setDictating(true);
+      setDictationStatus('Recording. Select the mic again to transcribe.');
+    } catch (reason) {
+      setDictationStatus('');
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : 'Microphone access was denied.',
+      );
+    }
+  };
   useEffect(() => {
     const subscription = copilotkit.subscribe({
       onError: ({ error }) => setError(error.message),
@@ -421,6 +498,26 @@ export function Chat({
         <div className="chat-compose-row">
           <button
             type="button"
+            className={`icon-button local-dictation-button${dictating ? ' active' : ''}`}
+            aria-label={
+              dictating
+                ? 'Stop recording and transcribe locally'
+                : 'Dictate locally'
+            }
+            title={`Local Whisper dictation using ${localTranscriptionModel} (model downloads on first use)`}
+            disabled={
+              running ||
+              paused ||
+              (!!dictationStatus &&
+                !dictating &&
+                dictationStatus.startsWith('Transcribing'))
+            }
+            onClick={() => void toggleDictation()}
+          >
+            <Mic size={18} />
+          </button>
+          <button
+            type="button"
             className="icon-button"
             aria-label="Add source page link"
             onClick={() => setSourceOpen(!sourceOpen)}
@@ -461,9 +558,16 @@ export function Chat({
           )}
         </div>
         <div className="chat-compose-note">
-          {voiceReady
-            ? 'Text and voice, one conversation.'
-            : 'Text is ready. Voice needs separate server configuration.'}
+          {dictationStatus ||
+            (voiceReady
+              ? 'Text and voice, one conversation.'
+              : 'Text is ready. Voice needs separate server configuration.')}
+          {!dictationStatus && (
+            <span title="Downloaded on first use and runs in this browser">
+              {' '}
+              · Local dictation (Whisper tiny English, cached here)
+            </span>
+          )}
         </div>
       </form>
     </div>

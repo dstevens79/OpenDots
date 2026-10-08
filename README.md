@@ -14,7 +14,7 @@ Built with [CopilotKit](https://github.com/CopilotKit/CopilotKit) and [AG-UI](ht
 
 <a href="https://trendshift.io/repositories/275323" target="_blank"><img src="https://trendshift.io/api/badge/trendshift/repositories/275323/daily?language=TypeScript" alt="CopilotKit/OpenDots | Trendshift #2 TypeScript Repository Of The Day" width="250" height="55"/></a>
 
-Host OpenDots on your own infrastructure. Conversations require CopilotKit Intelligence: use the hosted service, the [local Docker evaluation](docs/SETUP.md#local-intelligence-evaluation), or a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting). Clone this template and customize it however you want.
+Host OpenDots on your own infrastructure with local SQLite-backed conversations and CopilotKit's published OSS SSE runtime. Chat and page conversations do not require a CopilotKit Intelligence subscription or key. Configure an OpenAI-compatible model endpoint (such as OmniRoute) in `.env`; disable optional external web research by default and opt in with `WEB_SEARCH_PROVIDER=parallel` or `browser` when desired. Managed Slack Channels, Learning/skills, and realtime voice still depend on their respective external services. See [self-hosted setup](docs/SETUP.md#self-hosted-no-intelligence).
 
 [**Building on OpenDots? Meet with the CopilotKit team →**](https://www.copilotkit.ai/talk-to-an-engineer?ref=opendots_readme)
 
@@ -44,7 +44,7 @@ OpenDots is a starting point for building your own agent workspace. Clone it, de
 
 A Space is a home for working documents. Dots appear separately in navigation and can be granted access to multiple Spaces in their settings. Each Dot has a default destination for saved pages; existing installations retain their original Space access. Browse pages in a searchable library, switch between grid and list views, and organize documents as nested subpages. Open a page in a focused visual editor with formatting, slash commands, and undo/redo. Write directly, save a conversation as a page, or ask a specialist to create and revise content.
 
-Pages stay in the local workspace database. Their conversations use CopilotKit Threads, with a separate conversation for each page and specialist. Page links connect the document workspace to Dot chat. Manual editing works before you configure conversation services. Autosave reports its progress, failed saves retain your draft, and revision checks prevent stale edits from overwriting newer content. Markdown source mode remains available.
+Pages stay in the local workspace database. Their conversations use local SQLite-backed threads, with a separate conversation for each page and specialist. Page links connect the document workspace to Dot chat. Manual editing works before you configure conversation services. Autosave reports its progress, failed saves retain your draft, and revision checks prevent stale edits from overwriting newer content. Markdown source mode remains available.
 
 <div align="center">
 
@@ -166,9 +166,9 @@ cp .env.example .env
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. You can create Spaces, write pages, and configure Dots before connecting services. To start chatting, connect an Intelligence project and a model.
+Open **http://127.0.0.1:5173**. You can create Spaces, write pages, and configure Dots. To start chatting, set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` in `.env`. No Intelligence project or subscription is needed. For a local setup, see [self-hosted setup](docs/SETUP.md#self-hosted-no-intelligence).
 
-Choose where to store conversations before connecting. For local Docker evaluation, follow [Local Intelligence evaluation](docs/SETUP.md#local-intelligence-evaluation). For hosted Intelligence, sign in and select or create a project in the `OpenDots` folder:
+Optional managed Slack and Learning integrations can use Intelligence. For hosted Intelligence, sign in and select or create a project in the `OpenDots` folder:
 
 ```sh
 npx copilotkit@latest login
@@ -183,11 +183,11 @@ See [Setup](docs/SETUP.md) for configuration, Slack, calls, the browser service,
 
 ## Data and privacy
 
-Conversation messages, tool calls, and run events are persisted in the configured Intelligence deployment. The hosted setup sends them to CopilotKit's cloud; the local evaluation setup uses Intelligence on your machine. OpenDots has no standalone SQLite conversation store. SQLite stores pages, workspace metadata, and thread bindings separately.
+Conversation messages, tool calls, run events, pages, and workspace metadata are stored together in local SQLite. Chat uses CopilotKit's published SSE runtime and does not require Intelligence. Configure an OpenAI-compatible model endpoint; it receives the conversation context and authorized page content. For local-only processing, point it at a local model gateway such as OmniRoute. Local Whisper dictation records and transcribes audio entirely in your browser; the model downloads once into the browser cache.
 
-The configured model provider receives conversation context, including authorized page content and tool results. Local Intelligence does not make a remote model local: configure the app's model and the Automatic Learning model separately. Public-web research sends queries and selected URLs to Parallel by default; set `WEB_SEARCH_PROVIDER=disabled` to disable those tools. Speech and messaging integrations send data to their configured providers when used.
+The configured model provider receives conversation context, including authorized page content and tool results. Public-web research is disabled by default; configure a provider to enable it. Realtime spoken conversations and managed messaging integrations send data to their configured providers when used.
 
-CopilotKit SDK telemetry collects usage metadata separately from conversation persistence. OpenDots also records bounded browser setup stages and first successful assistant activation with a random installation ID; the same opt-out flags disable this tracking and purge pending setup events. See [browser setup telemetry](docs/SETUP-TELEMETRY.md). Runtime events are tagged `OpenDots`; see [signup and usage tracking](docs/TELEMETRY.md). Set `COPILOTKIT_TELEMETRY_DISABLED=true` or `DO_NOT_TRACK=1` to opt out; see [CopilotKit telemetry](https://docs.copilotkit.ai/telemetry). Review [CopilotKit's privacy policy](https://www.copilotkit.ai/privacy-policy) and the policies and retention settings of each service you configure. Installing or renewing local Intelligence still requires CopilotKit sign-in and internet access.
+Telemetry is disabled by default in the self-hosted configuration. Set `COPILOTKIT_TELEMETRY_DISABLED=false` and `DO_NOT_TRACK=0` to opt in. Review each external provider's data policy before enabling it.
 
 ## Features
 
@@ -242,8 +242,8 @@ See [Contributing](CONTRIBUTING.md) for development guidance and [Security](SECU
 
 ## Public-web research
 
-Parallel is selected by default in live research and Dot conversations. Ask a topic-only question to discover and read up to five sources, or supply URLs to extract them directly. Sources are saved with their links. A browser worker is not required for this research path; computer tools remain available for interactive work.
+Public web research is disabled by default. To enable it, set `WEB_SEARCH_PROVIDER=parallel` in `.env`. Ask a topic-only question to discover and read up to five sources, or supply URLs to extract them directly. Sources are saved with their links. A browser worker is not required for this research path; computer tools remain available for interactive work.
 
-`WEB_SEARCH_PROVIDER=browser` preserves the existing URL-only browser reader, and `WEB_SEARCH_PROVIDER=disabled` disables these research tools. Workspace and Dot research permissions, pause and cancellation controls still apply. Sample research remains fictional and does not contact a provider.
+`WEB_SEARCH_PROVIDER=browser` selects the URL-only browser reader, and `WEB_SEARCH_PROVIDER=disabled` disables these research tools. Workspace and Dot research permissions, pause and cancellation controls still apply. Sample research remains fictional and does not contact a provider.
 
 Queries, requested URLs, a stable session identifier and the research objective are sent to `https://search.parallel.ai/mcp`. Memories and complete conversations are not automatically forwarded to Parallel. Model-selected objectives may still contain context from the conversation. The anonymous service is free for light use with provider-managed limits; set `PARALLEL_API_KEY` on the server for production or higher limits. Provider errors and empty results are reported rather than replaced with invented evidence. See [Parallel Search MCP documentation](https://docs.parallel.ai/integrations/mcp/search-mcp).

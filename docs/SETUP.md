@@ -1,6 +1,6 @@
 # Running the template
 
-OpenDots runs a React app and a Node server. The server stores pages, Space and Dot configuration, and thread bindings in SQLite and connects to your configured conversation, model, and messaging services.
+OpenDots runs a React app and a Node server. The server stores pages, Space and Dot configuration, thread bindings, and conversation history in SQLite. It connects to your configured model and optional messaging services.
 
 ## Local development
 
@@ -12,7 +12,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. The API runs on port 4310. Without service credentials, the app shows its setup state; it does not generate simulated replies.
+Open http://127.0.0.1:5173. The API runs on port 4310. Without model credentials, the app shows its setup state; it does not generate simulated replies.
 
 During `npm run dev`, both http://localhost:5173 and http://127.0.0.1:5173 are allowed browser origins. The UI sends API requests through Vite's `/api` proxy. To use a different proxy or custom domain, set `APP_ORIGIN` to one exact origin or a comma-separated list, for example `APP_ORIGIN=http://localhost:5173,http://127.0.0.1:5173`. An explicit value replaces the development defaults. Origins must match the scheme, hostname, and port exactly; omit paths and trailing slashes. Whitespace around list entries is trimmed and empty entries are ignored. Outside development, leaving `APP_ORIGIN` unset requires the browser origin to match the request URL's origin. This setting preserves cross-site request blocking; it does not enable direct cross-origin browser access to the API.
 
@@ -25,9 +25,21 @@ npm start
 
 Open http://127.0.0.1:4310. Keep the server running for background work.
 
+In chat, choose the microphone button for local Whisper dictation. The first use downloads an English Whisper tiny model into the browser cache; the browser transcribes microphone audio locally and appends the text to the draft. This model is larger than 16 MB and English-only. Microphone access requires permission and HTTPS or localhost.
+
 ## Conversation services
 
-OpenDots requires CopilotKit Intelligence for conversations. Choose local evaluation below, a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting), or hosted Intelligence. Pages and workspace metadata remain in SQLite; conversation history is stored separately. See [Data and privacy](../README.md#data-and-privacy).
+### Self-hosted, no Intelligence
+
+OpenDots runs CopilotKit's published SSE runtime and stores conversations in SQLite. It does not need an Intelligence account, subscription, or key. Set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` to an OpenAI-compatible model endpoint, such as OmniRoute. Start with `npm run dev` or `docker compose up --build -d`. Keep `WEB_SEARCH_PROVIDER=disabled` if you want all chat context to stay local to your deployment and selected model endpoint.
+
+Chat, page conversations, and local Whisper dictation work without Intelligence. Managed Slack Channels and Learning/skill publishing are Intelligence features. Realtime spoken conversations use the separately configured Realtime provider below.
+
+See [Data and privacy](../README.md#data-and-privacy).
+
+### Optional Intelligence deployment
+
+The older managed Slack and Learning integrations can use hosted Intelligence, a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting), or the local evaluation preview below. Chat itself does not depend on those services.
 
 ### Hosted Intelligence
 
@@ -91,11 +103,11 @@ Select a Space to open its page library. Search for a document, switch between g
 
 Page actions include creating subpages, moving a page within its Space, deleting a page (its subpages move up to the deleted page's parent), and editing Markdown source. Existing documents with unsupported visual-editor syntax stay in source mode to preserve their content. Manual editing works without conversation credentials.
 
-Open a page's chat and choose a specialist with access to that Space. Grant access from the Dot’s settings in the sidebar. The server creates or reuses a CopilotKit Thread for that page and specialist. The Dot receives the current saved page as context and can read, create, and edit pages in its authorized Spaces. The page conversation uses that page’s Space by default; other chats use the Dot’s default page destination. Save your manual edits before asking it to revise the document. Revision checks reject stale writes; a conflict keeps your local draft available for recovery. Failed saves stop automatic retries until you retry or resolve the conflict, so a disconnected session does not silently replace newer content.
+Open a page's chat and choose a specialist with access to that Space. Grant access from the Dot’s settings in the sidebar. The server creates or reuses a local SQLite-backed conversation for that page and specialist. The Dot receives the current saved page as context and can read, create, and edit pages in its authorized Spaces. The page conversation uses that page’s Space by default; other chats use the Dot’s default page destination. Save your manual edits before asking it to revise the document. Revision checks reject stale writes; a conflict keeps your local draft available for recovery. Failed saves stop automatic retries until you retry or resolve the conflict, so a disconnected session does not silently replace newer content.
 
-Use the conversation's save-to-page action to create a document from its saved text history. This requires a working conversation service. Pages retain a link to the source conversation, and page links in chat open the document workspace.
+Use the conversation's save-to-page action to create a document from its saved text history. This requires saved local conversation history. Pages retain a link to the source conversation, and page links in chat open the document workspace.
 
-Back up both storage layers: SQLite contains page content and thread bindings; the Intelligence project contains conversation history. The template does not include multi-user page sharing, realtime collaboration, file uploads, or arbitrary interactive embeds.
+Back up SQLite to retain pages and conversation history together. The template does not include multi-user page sharing, realtime collaboration, file uploads, or arbitrary interactive embeds.
 
 ## Browser tool
 
@@ -236,3 +248,11 @@ npm run build
 ```
 
 Automated tests use service fixtures. Live model, Intelligence, Slack, and voice verification requires your own configured services.
+
+# Self-hosted, no Intelligence subscription
+
+The web app, local conversations, and chat history run on your own machine. No CopilotKit Intelligence key, trial, or subscription is needed for text chat or page conversations. The runtime uses the published CopilotKit OSS SSE mode, and OpenDots saves messages/events in its local SQLite database.
+
+Set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` to an OpenAI-compatible provider. For a local OmniRoute gateway, use its LAN-reachable `/v1` URL and an OmniRoute key. Keep `OWNER_TOKEN` set when binding to a LAN address. The example Compose configuration disables setup telemetry and web search by default. Public web research can be enabled explicitly with `WEB_SEARCH_PROVIDER=parallel` or `browser`; those providers receive the prompt or URL needed for research.
+
+Managed Slack Channels, CopilotKit Learning/skill delivery, and realtime voice use separately hosted services and are not part of this no-subscription chat mode. Scheduled/headless tasks that require a local durable run API are also not included in the first self-hosted slice.

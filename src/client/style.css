@@ -2299,6 +2299,14 @@ h3 {
 .chat-compose-row .icon-button {
   margin-bottom: 5px;
 }
+.local-dictation-button.active {
+  color: #a23c3c;
+  background: #f8e5e3;
+}
+.local-dictation-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .chat-compose-note {
   font-size: 11px;
   color: #606b63;

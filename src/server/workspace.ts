@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validateLearningSettings } from '../shared/learning.js';
+import type { Message, BaseEvent } from '@ag-ui/client';
 import type { CallReceipt, Conversation, Dot, Space } from '../shared/types.js';
 export class WorkspaceStore {
   private db: DatabaseSync;
@@ -22,6 +23,7 @@ export class WorkspaceStore {
       CREATE TABLE IF NOT EXISTS spaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS dots(id TEXT PRIMARY KEY, spaceId TEXT NOT NULL, name TEXT NOT NULL, instructions TEXT NOT NULL, researchAllowed INTEGER NOT NULL, memoryAllowed INTEGER NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS thread_bindings(id TEXT PRIMARY KEY, dotId TEXT NOT NULL, ownerId TEXT NOT NULL, title TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS thread_history(threadId TEXT PRIMARY KEY, messages TEXT NOT NULL, events TEXT NOT NULL, updatedAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS task_threads(taskId TEXT PRIMARY KEY, threadId TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS calls(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, startedAt INTEGER NOT NULL, endedAt INTEGER, status TEXT NOT NULL, transcript TEXT NOT NULL, error TEXT);
       CREATE TABLE IF NOT EXISTS captures(threadId TEXT PRIMARY KEY, value TEXT NOT NULL);`);
@@ -262,6 +264,33 @@ export class WorkspaceStore {
         value.learningContainerId ?? null,
       );
     return value;
+  }
+  saveThreadSnapshot(id: string, messages: Message[], events: BaseEvent[]) {
+    this.requireThread(id);
+    this.db
+      .prepare(
+        'INSERT INTO thread_history(threadId,messages,events,updatedAt) VALUES(?,?,?,?) ON CONFLICT(threadId) DO UPDATE SET messages=excluded.messages, events=excluded.events, updatedAt=excluded.updatedAt',
+      )
+      .run(id, JSON.stringify(messages), JSON.stringify(events), Date.now());
+  }
+  threadMessages(id: string): Message[] {
+    this.requireThread(id);
+    const row = this.db
+      .prepare('SELECT messages FROM thread_history WHERE threadId=?')
+      .get(id) as { messages: string } | undefined;
+    return row ? (JSON.parse(row.messages) as Message[]) : [];
+  }
+  threadEvents(id: string): BaseEvent[] {
+    this.requireThread(id);
+    const row = this.db
+      .prepare('SELECT events FROM thread_history WHERE threadId=?')
+      .get(id) as { events: string } | undefined;
+    return row ? (JSON.parse(row.events) as BaseEvent[]) : [];
+  }
+  threadHistory() {
+    return this.db.prepare('SELECT threadId FROM thread_history').all() as {
+      threadId: string;
+    }[];
   }
   requireThread(id: string, dotId?: string): Conversation {
     const thread = this.conversations().find((thread) => thread.id === id);

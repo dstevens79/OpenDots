@@ -2,16 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { PageError } from './pages.js';
 import type { WorkspaceStore } from './workspace.js';
 export interface PageIntelligence {
-  getOrCreateThread(input: {
-    threadId: string;
-    userId: string;
-    agentId: string;
-    name: string;
-  }): Promise<unknown>;
-  getThreadMessages(input: {
-    threadId: string;
-    userId: string;
-  }): Promise<{ messages: { role: string; content?: unknown }[] }>;
+  getThreadMessages(
+    threadId: string,
+  ):
+    | { role: string; content?: unknown }[]
+    | Promise<{ messages: { role: string; content?: unknown }[] }>;
 }
 async function bounded<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -41,7 +36,7 @@ export class PageService {
   >();
   constructor(
     private workspace: WorkspaceStore,
-    private intelligence: () => PageIntelligence,
+    private intelligence: PageIntelligence | (() => PageIntelligence),
   ) {}
   async conversation(spaceId: string, pageId: string, dotId: string) {
     const page = this.workspace.pages.get(spaceId, pageId);
@@ -57,7 +52,6 @@ export class PageService {
     const current = this.workspace.pages.thread(pageId, dotId);
     if (current?.ready)
       return this.workspace.requireThread(current.threadId, dotId);
-    const sdk = this.intelligence();
     const task = (async () => {
       const candidateId = randomUUID();
       if (!this.workspace.pages.reserveThread(pageId, dotId, candidateId))
@@ -67,14 +61,6 @@ export class PageService {
         );
       const threadId = this.workspace.pages.thread(pageId, dotId)!.threadId;
       try {
-        await bounded(
-          sdk.getOrCreateThread({
-            threadId,
-            userId: this.workspace.ownerId,
-            agentId: dotId,
-            name: page.title,
-          }),
-        );
         if (!this.workspace.canAccessSpace(dotId, spaceId))
           throw new PageError('Space access has been revoked.');
         const thread =
@@ -101,12 +87,14 @@ export class PageService {
   ) {
     const thread = this.workspace.requireThread(threadId);
     const dot = this.workspace.dot(thread.dotId)!;
-    const history = await bounded(
-      this.intelligence().getThreadMessages({
-        threadId,
-        userId: this.workspace.ownerId,
-      }),
-    );
+    const provider =
+      typeof this.intelligence === 'function'
+        ? this.intelligence()
+        : this.intelligence;
+    const rawHistory = provider.getThreadMessages(threadId);
+    const history = Array.isArray(rawHistory)
+      ? { messages: rawHistory }
+      : await bounded(rawHistory);
     const chunks: string[] = [];
     for (const message of history.messages) {
       if (!['user', 'assistant'].includes(message.role)) continue;

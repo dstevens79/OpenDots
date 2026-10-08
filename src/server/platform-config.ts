@@ -63,7 +63,6 @@ export function setupStatus(
   activationFailed = false,
 ): SetupStatus {
   const missing = [
-    !config.intelligenceKey && INTELLIGENCE_KEY_MISSING_LABEL,
     !config.apiKey && 'OPENAI_API_KEY',
     !config.model && 'OPENAI_MODEL',
   ].filter((item): item is string => !!item);
@@ -80,10 +79,15 @@ export function setupStatus(
       ? 'setup_required'
       : 'not_configured';
   return {
-    intelligence: !!config.intelligenceKey,
+    intelligence: true,
     model: !!(config.apiKey && config.model),
     browser: !!(config.browserUrl && config.browserSecret),
-    voice: !!(config.voiceKey && config.voiceModel && !missing.length),
+    voice: !!(
+      config.voiceKey &&
+      config.voiceModel &&
+      config.apiKey &&
+      config.model
+    ),
     slack,
     missing,
   };

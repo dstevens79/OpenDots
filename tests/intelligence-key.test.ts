@@ -1,7 +1,6 @@
 import { expect, it } from 'vitest';
 import { Platform } from '../src/server/platform.js';
 import {
-  INTELLIGENCE_KEY_MISSING_LABEL,
   intelligenceApiKeyFromEnv,
   intelligenceWsUrlFromEnv,
   setupStatus,
@@ -41,7 +40,7 @@ it('accepts the CLI project key and still accepts the template name', () => {
   expect(intelligenceApiKeyFromEnv({})).toBeUndefined();
 });
 
-it('reports either accepted name from the same label used by setup status and the copilotkit error', async () => {
+it('does not require hosted Intelligence credentials for the local SSE runtime', async () => {
   const key = intelligenceApiKeyFromEnv({
     CPK_INTELLIGENCE_API_KEY: 'cpk-from-cli',
   });
@@ -49,11 +48,7 @@ it('reports either accepted name from the same label used by setup status and th
     intelligence: true,
     missing: [],
   });
-  expect(INTELLIGENCE_KEY_MISSING_LABEL).toContain('CPK_INTELLIGENCE_API_KEY');
-  expect(INTELLIGENCE_KEY_MISSING_LABEL).toContain('INTELLIGENCE_API_KEY');
-  expect(setupStatus(configured).missing).toContain(
-    INTELLIGENCE_KEY_MISSING_LABEL,
-  );
+  expect(setupStatus(configured).missing).toEqual([]);
 
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'owner');
@@ -62,11 +57,9 @@ it('reports either accepted name from the same label used by setup status and th
     const response = await platform.handle(
       new Request('http://127.0.0.1/api/copilotkit/info'),
     );
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: `Setup required: ${INTELLIGENCE_KEY_MISSING_LABEL}.`,
-    });
-    expect(platform.setup().missing).toContain(INTELLIGENCE_KEY_MISSING_LABEL);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ mode: 'sse' });
+    expect(platform.setup().missing).toEqual([]);
   } finally {
     store.close();
     workspace.close();

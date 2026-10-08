@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { PageService } from '../src/server/page-service.js';
 import { pageAccess } from '../src/server/page-tools.js';
-it('reuses one actual Intelligence thread per page and Dot under concurrent requests', async () => {
+it('creates one durable local thread per page and Dot under concurrent requests', async () => {
   const ws = new WorkspaceStore(':memory:', 'owner');
   const dot = ws.dots()[0];
   const page = ws.pages.create(dot.spaceId, { title: 'Design' });
@@ -17,7 +17,7 @@ it('reuses one actual Intelligence thread per page and Dot under concurrent requ
     service.conversation(dot.spaceId, page.id, dot.id),
   ]);
   expect(a.id).toBe(b.id);
-  expect(getOrCreateThread).toHaveBeenCalledTimes(1);
+  expect(getOrCreateThread).not.toHaveBeenCalled();
   expect((await service.conversation(dot.spaceId, page.id, dot.id)).id).toBe(
     a.id,
   );
@@ -79,7 +79,7 @@ it('scopes agent tools to the Dot Space and re-reads current context with CAS an
   expect(ws.pages.list(dot.spaceId)).toHaveLength(1);
   ws.close();
 });
-it('recovers the same reserved thread after a restart lease and a remote-success retry', async () => {
+it('recovers the same reserved local thread after a restart lease', async () => {
   const ws = new WorkspaceStore(':memory:', 'owner');
   const dot = ws.dots()[0];
   const page = ws.pages.create(dot.spaceId, { title: 'Recover' });
@@ -95,13 +95,7 @@ it('recovers the same reserved thread after a restart lease and a remote-success
   vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 61000);
   const result = await service.conversation(dot.spaceId, page.id, dot.id);
   expect(result.id).toBe('stable-thread');
-  expect(sdk.getOrCreateThread).toHaveBeenCalledWith(
-    expect.objectContaining({
-      threadId: 'stable-thread',
-      userId: 'owner',
-      agentId: dot.id,
-    }),
-  );
+  expect(sdk.getOrCreateThread).not.toHaveBeenCalled();
   vi.restoreAllMocks();
   ws.close();
 });
@@ -120,7 +114,7 @@ it('rejects a specialist in another Space before Intelligence is accessed', asyn
   expect(getSdk).not.toHaveBeenCalled();
   ws.close();
 });
-it('retries a failed provider creation with the same canonical reserved ID', async () => {
+it('creates a local thread without calling the configured provider', async () => {
   const ws = new WorkspaceStore(':memory:', 'owner');
   const dot = ws.dots()[0];
   const page = ws.pages.create(dot.spaceId, { title: 'Retry' });
@@ -131,13 +125,12 @@ it('retries a failed provider creation with the same canonical reserved ID', asy
     getOrCreateThread,
     getThreadMessages: async () => ({ messages: [] }),
   }));
-  await expect(
-    service.conversation(dot.spaceId, page.id, dot.id),
-  ).rejects.toThrow('Remote response lost');
+  const first = await service.conversation(dot.spaceId, page.id, dot.id);
   const reserved = ws.pages.thread(page.id, dot.id)!.threadId;
   const thread = await service.conversation(dot.spaceId, page.id, dot.id);
+  expect(first.id).toBe(reserved);
   expect(thread.id).toBe(reserved);
-  expect(getOrCreateThread).toHaveBeenCalledTimes(2);
+  expect(getOrCreateThread).not.toHaveBeenCalled();
   ws.close();
 });
 
