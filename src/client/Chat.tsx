@@ -41,6 +41,7 @@ import {
   localTranscriptionModel,
   transcribeAudio,
 } from './local-transcription';
+import { createClientMessageId } from './message-id';
 
 export function Chat({
   thread,
@@ -214,7 +215,7 @@ export function Chat({
     setError('');
     setRunning(true);
     agent.addMessage({
-      id: crypto.randomUUID(),
+      id: createClientMessageId(),
       role: 'user',
       content: contextualMessage(text, pageContext),
     });
