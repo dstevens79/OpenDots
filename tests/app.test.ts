@@ -164,6 +164,51 @@ describe('API boundaries', () => {
       ).status,
     ).toBe(200);
   });
+  it('unlocks LAN access with a Linux password and an HttpOnly session', async () => {
+    const store = new Store(':memory:');
+    stores.push(store);
+    const runner = new Runner(store, config);
+    const app = createApp({
+      store,
+      runner,
+      config,
+      ownerUsername: 'dstevens',
+      authenticateOwner: async (username, password) =>
+        username === 'dstevens' && password === 'correct-password',
+    });
+    expect((await app.request('/api/state')).status).toBe(401);
+    const denied = await app.request('/api/auth/login', {
+      ...json({ password: 'wrong-password' }),
+    });
+    expect(denied.status).toBe(401);
+
+    const accepted = await app.request('/api/auth/login', {
+      ...json({ password: 'correct-password' }),
+    });
+    expect(accepted.status).toBe(200);
+    expect(accepted.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(accepted.headers.get('set-cookie')).toContain('SameSite=Strict');
+    const cookie = accepted.headers.get('set-cookie')!.split(';')[0];
+    expect(
+      (
+        await app.request('/api/state', {
+          headers: { Cookie: cookie },
+        })
+      ).status,
+    ).toBe(200);
+
+    await app.request('/api/auth/logout', {
+      ...json({}),
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    });
+    expect(
+      (
+        await app.request('/api/state', {
+          headers: { Cookie: cookie },
+        })
+      ).status,
+    ).toBe(401);
+  });
   it('blocks browser cross-origin requests and form posts', async () => {
     const { app } = fixture();
     expect(

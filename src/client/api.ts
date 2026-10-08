@@ -1,9 +1,3 @@
-let token = sessionStorage.getItem('opendots-token') ?? '';
-export function setToken(value: string) {
-  token = value;
-  if (value) sessionStorage.setItem('opendots-token', value);
-  else sessionStorage.removeItem('opendots-token');
-}
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -21,12 +15,10 @@ export async function api<T>(
   const response = await fetch(`/api${path}`, {
     method,
     signal,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(['GET', 'HEAD'].includes(method)
-        ? {}
-        : { 'Content-Type': 'application/json' }),
-    },
+    credentials: 'same-origin',
+    headers: ['GET', 'HEAD'].includes(method)
+      ? {}
+      : { 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = (await response
@@ -40,7 +32,4 @@ export async function api<T>(
       response.status,
     );
   return data as T;
-}
-export function authHeaders(): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }

@@ -31,7 +31,7 @@ import type {
   State,
   WorkspaceState,
 } from '../shared/types';
-import { api, ApiError, authHeaders, setToken } from './api';
+import { api, ApiError } from './api';
 import {
   applyCaptureResult,
   applyRefreshResult,
@@ -119,6 +119,7 @@ export function App() {
       current.action === action ? current : { ...current, action },
     );
   const [auth, setAuth] = useState('');
+  const [authUsername, setAuthUsername] = useState('');
   const [needsAuth, setNeedsAuth] = useState(false);
   const [dialog, setDialog] = useState<Dialog>();
   const [mobile, setMobile] = useState(false);
@@ -156,6 +157,12 @@ export function App() {
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
   }, [refresh]);
+  useEffect(() => {
+    if (!needsAuth) return;
+    void api<{ username?: string }>('/auth/status')
+      .then((result) => setAuthUsername(result.username ?? ''))
+      .catch(() => setAuthUsername(''));
+  }, [needsAuth]);
   useEffect(() => {
     setCapture(undefined);
     if (!selectedThread) return;
@@ -241,28 +248,29 @@ export function App() {
         <Mascot />
         <h1>Your own little corner.</h1>
         <p>
-          Enter the owner access token configured on this template’s server.
+          Enter the Ubuntu password for{' '}
+          {authUsername || 'the account chosen during installation'}.
         </p>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            setToken(auth);
             try {
-              await api('/state');
+              await api('/auth/login', 'POST', { password: auth });
+              setAuth('');
               setError('');
               await refresh();
             } catch (err) {
               setError(
                 err instanceof Error
                   ? err.message
-                  : 'Access token was not accepted.',
+                  : 'That Linux account password was not accepted.',
               );
             }
           }}
         >
           <input
             type="password"
-            aria-label="Owner access token"
+            aria-label="Linux account password"
             autoComplete="current-password"
             value={auth}
             onChange={(e) => setAuth(e.target.value)}
@@ -275,7 +283,9 @@ export function App() {
             {error}
           </p>
         )}
-        <p className="muted">The token stays in this tab’s session storage.</p>
+        <p className="muted">
+          Your password is checked by Ubuntu and is not saved by OpenDots.
+        </p>
       </main>
     );
   if (!state || !workspace || !dot)
@@ -928,7 +938,7 @@ export function App() {
     </div>
   );
   return configured ? (
-    <CopilotKitProvider runtimeUrl="/api/copilotkit" headers={authHeaders()}>
+    <CopilotKitProvider runtimeUrl="/api/copilotkit">
       {content}
     </CopilotKitProvider>
   ) : (

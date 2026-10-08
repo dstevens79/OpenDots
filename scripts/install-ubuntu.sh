@@ -21,6 +21,21 @@ fi
 
 echo "This installs OpenDots and selected helpers as native Ubuntu services. No Docker containers are used."
 read -r -p "Allow access from other devices on your LAN? [y/N] " expose_lan
+owner_username=""
+runtime_token=""
+if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
+  owner_username="$(sed -n 's/^OWNER_USERNAME=//p' "$ENV_FILE" 2>/dev/null | tail -n 1 || true)"
+  if [[ -z "$owner_username" ]]; then
+    owner_username="${SUDO_USER:-}"
+  fi
+  if [[ -z "$owner_username" ]]; then
+    read -r -p "Linux account for password login: " owner_username
+  fi
+  if ! id "$owner_username" >/dev/null 2>&1; then
+    echo "Linux account '$owner_username' does not exist." >&2
+    exit 1
+  fi
+fi
 read -r -p "Install optional machine-level Harnesses? [y/N] " install_harnesses
 if [[ "$install_harnesses" =~ ^[Yy]$ ]]; then
   install_manager="y"
@@ -36,7 +51,10 @@ fi
 read -r -p "Install the optional local public-page browser reader? [y/N] " install_browser
 
 apt-get update
-apt-get install -y ca-certificates curl git openssl python3
+apt-get install -y ca-certificates curl git libpam0g openssl python3
+if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
+  runtime_token="$(openssl rand -hex 32)"
+fi
 if [[ ! -x /usr/bin/node || ! -x /usr/bin/npm ]] || [[ "$(/usr/bin/node -p 'Number(process.versions.node.split(".")[0])')" -lt 24 ]]; then
   curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   apt-get install -y nodejs
@@ -50,18 +68,14 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
   bind_host="0.0.0.0"
-  if ! grep -q '^OWNER_TOKEN=.' "$ENV_FILE"; then
-    owner_token="$(openssl rand -hex 32)"
-    printf 'OWNER_TOKEN=%s\n' "$owner_token" >> "$ENV_FILE"
-    echo
-    echo "Save this owner login token; it is shown only once:"
-    echo "$owner_token"
-    echo
-  fi
+  cat > /etc/pam.d/opendots <<'PAM'
+@include common-auth
+@include common-account
+PAM
 else
   bind_host="127.0.0.1"
 fi
-python3 - "$ENV_FILE" "$bind_host" "$DATA_DIR/opendots.sqlite" <<'PY'
+python3 - "$ENV_FILE" "$bind_host" "$DATA_DIR/opendots.sqlite" "$owner_username" "$runtime_token" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 values = {
@@ -72,9 +86,14 @@ values = {
     'DO_NOT_TRACK': '1',
     'COPILOTKIT_TELEMETRY_DISABLED': 'true',
 }
+if sys.argv[4]:
+    values['OWNER_USERNAME'] = sys.argv[4]
+if sys.argv[5]:
+    values['RUNTIME_TOKEN'] = sys.argv[5]
 lines = path.read_text().splitlines()
-for key, value in values.items():
+for key in (*values.keys(), 'OWNER_TOKEN', 'OWNER_USERNAME', 'RUNTIME_TOKEN'):
     lines = [line for line in lines if not line.startswith(key + '=')]
+for key, value in values.items():
     lines.append(f'{key}={value}')
 path.write_text('\n'.join(lines) + '\n')
 PY
@@ -142,8 +161,6 @@ systemctl restart opendots.service
 echo
 echo "OpenDots is installed and running. Open http://localhost:4310, then add a model connection in Settings."
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
-  if grep -q '^OWNER_TOKEN=.' "$ENV_FILE"; then
-    echo "LAN access is enabled. The owner login token is stored in $ENV_FILE (keep it private)."
-  fi
+  echo "LAN access is enabled. Sign in with the password for Linux account $owner_username."
 fi
 echo "Optional harnesses are installed from Settings → Harnesses; choose only the ones you want."

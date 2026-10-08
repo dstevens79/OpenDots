@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { api, authHeaders } from './api';
+import { api } from './api';
 import type { Dot, Memory, State, WorkspaceState } from '../shared/types';
 import { ConnectionsSection } from './ConnectionsSection';
 import {
@@ -856,7 +856,6 @@ export function WorkspaceDialog({
                             method: 'POST',
                             headers: {
                               'Content-Type': 'application/json',
-                              ...authHeaders(),
                             },
                             body: JSON.stringify({
                               target: 'connection',
@@ -941,7 +940,6 @@ export function WorkspaceDialog({
                               method: 'POST',
                               headers: {
                                 'Content-Type': 'application/json',
-                                ...authHeaders(),
                               },
                               body: JSON.stringify({
                                 target: 'connection',
@@ -1034,7 +1032,6 @@ export function WorkspaceDialog({
                               method: 'POST',
                               headers: {
                                 'Content-Type': 'application/json',
-                                ...authHeaders(),
                               },
                               body: JSON.stringify({
                                 target: 'connection',
@@ -1124,7 +1121,6 @@ export function WorkspaceDialog({
                               method: 'POST',
                               headers: {
                                 'Content-Type': 'application/json',
-                                ...authHeaders(),
                               },
                               body: JSON.stringify({
                                 target: 'opencode',
@@ -1404,7 +1400,6 @@ export function WorkspaceDialog({
                             method: 'POST',
                             headers: {
                               'Content-Type': 'application/json',
-                              ...authHeaders(),
                             },
                             body: JSON.stringify({
                               target: 'voice',

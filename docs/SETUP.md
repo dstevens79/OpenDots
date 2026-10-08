@@ -17,13 +17,13 @@ An endpoint can be a local model gateway, OmniRoute, or another OpenAI-compatibl
 
 ## Home network access
 
-The installer defaults to local-only access. If you choose LAN access, it creates an owner login token and shows it once. Save it somewhere you control. To change the binding later, edit `.env` in `/opt/opendots` and restart:
+The installer defaults to local-only access. If you choose LAN access, it uses the password of the Linux account that ran the installer with `sudo`. The password is checked through Ubuntu PAM and is never saved by OpenDots. A short-lived, HttpOnly browser session keeps you signed in for 12 hours; the installer also keeps a private internal service token for local agent requests. To change the binding later, edit `.env` in `/opt/opendots` and restart:
 
 ```sh
 sudo systemctl restart opendots
 ```
 
-For LAN-only access, bind the app with `HOST=0.0.0.0` and keep the owner token enabled. The native installer handles these settings for you.
+For LAN access, keep `HOST=0.0.0.0`, `OWNER_USERNAME`, and the `/etc/pam.d/opendots` PAM service configured. The native installer handles these settings for you. For a manual Ubuntu install, set `OWNER_USERNAME` to the Linux account whose password should unlock OpenDots, create `/etc/pam.d/opendots` with `@include common-auth` and `@include common-account`, and set a private `RUNTIME_TOKEN` for local agent requests. Install `libpam0g` and Python 3 so password checks can use Ubuntu's account database.
 
 ## Local computer workspace
 

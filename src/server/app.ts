@@ -2,7 +2,7 @@ import { computerRoutes } from './computer-routes.js';
 import { connectionRoutes } from './connection-routes.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { Store } from './store.js';
 import { Runner } from './runner.js';
@@ -16,6 +16,8 @@ export interface AppOptions {
   runner: Runner;
   config: Config;
   ownerToken?: string;
+  ownerUsername?: string;
+  authenticateOwner?: (username: string, password: string) => Promise<boolean>;
   origin?: string | string[];
   platform?: Platform;
 }
@@ -24,12 +26,33 @@ export function createApp({
   runner,
   config,
   ownerToken,
+  ownerUsername,
+  authenticateOwner,
   origin,
   platform,
 }: AppOptions) {
   const app = new Hono();
   const managerUrl = (process.env.HARNESS_MANAGER_URL || '').replace(/\/$/, '');
   const managerToken = process.env.HARNESS_MANAGER_TOKEN || '';
+  const sessions = new Map<string, number>();
+  const sessionCookie = 'opendots_session';
+  const sessionLifetimeSeconds = 12 * 60 * 60;
+  const sessionFromRequest = (request: Request) => {
+    const cookie = request.headers.get('cookie');
+    const value = cookie
+      ?.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${sessionCookie}=`))
+      ?.slice(sessionCookie.length + 1);
+    if (!value) return undefined;
+    const expiresAt = sessions.get(value);
+    if (!expiresAt) return undefined;
+    if (expiresAt <= Date.now()) {
+      sessions.delete(value);
+      return undefined;
+    }
+    return value;
+  };
   const requestHarnessManager = async <T extends Record<string, unknown>>(
     path: string,
     body?: unknown,
@@ -88,7 +111,7 @@ export function createApp({
       '[::1]',
       ...originHostnames,
     ]);
-    if (!ownerToken && !allowedHosts.has(requestUrl.hostname))
+    if (!ownerToken && !ownerUsername && !allowedHosts.has(requestUrl.hostname))
       return c.json({ error: 'Unrecognized host.' }, 403);
     const requestOrigin = c.req.header('origin');
     const allowedOrigins = new Set(origins ?? [new URL(c.req.url).origin]);
@@ -96,7 +119,36 @@ export function createApp({
       return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
     if (c.req.header('sec-fetch-site') === 'cross-site')
       return c.json({ error: 'Cross-site requests are not allowed.' }, 403);
-    if (ownerToken) {
+    const path = requestUrl.pathname;
+    const authEndpoint = [
+      '/api/auth/login',
+      '/api/auth/status',
+      '/api/auth/logout',
+    ].includes(path);
+    if (ownerUsername && !authEndpoint) {
+      const session = sessionFromRequest(c.req.raw);
+      const bearer = c.req.header('authorization')?.replace(/^Bearer /, '');
+      const tokenAccepted =
+        !!ownerToken &&
+        !!bearer &&
+        (() => {
+          const expected = Buffer.from(ownerToken);
+          const supplied = Buffer.from(bearer);
+          return (
+            expected.length === supplied.length &&
+            timingSafeEqual(expected, supplied)
+          );
+        })();
+      if (!session && !tokenAccepted)
+        return c.json(
+          {
+            error: ownerUsername
+              ? 'Enter your Linux account password to unlock OpenDots.'
+              : 'Enter your owner access token to unlock OpenDots.',
+          },
+          401,
+        );
+    } else if (ownerToken && !ownerUsername && !authEndpoint) {
       const expected = Buffer.from(ownerToken);
       const supplied = Buffer.from(
         c.req.header('authorization')?.replace(/^Bearer /, '') ?? '',
@@ -116,6 +168,45 @@ export function createApp({
     )
       return c.json({ error: 'Use application/json.' }, 415);
     await next();
+  });
+  app.get('/api/auth/status', (c) =>
+    c.json({
+      authenticated: !!sessionFromRequest(c.req.raw),
+      username: ownerUsername,
+    }),
+  );
+  app.post('/api/auth/login', async (c) => {
+    if (!ownerUsername || !authenticateOwner)
+      return c.json({ error: 'Password login is not configured.' }, 503);
+    const body = z
+      .object({ password: z.string().min(1).max(1024) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success)
+      return c.json({ error: 'Enter your Linux account password.' }, 400);
+    const accepted = await authenticateOwner(ownerUsername, body.data.password);
+    if (!accepted)
+      return c.json(
+        { error: 'That Linux account password was not accepted.' },
+        401,
+      );
+    const session = randomBytes(32).toString('hex');
+    sessions.set(session, Date.now() + sessionLifetimeSeconds * 1000);
+    const secure = new URL(c.req.url).protocol === 'https:' ? '; Secure' : '';
+    c.header(
+      'Set-Cookie',
+      `${sessionCookie}=${session}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${sessionLifetimeSeconds}${secure}`,
+    );
+    return c.json({ authenticated: true });
+  });
+  app.post('/api/auth/logout', (c) => {
+    const session = sessionFromRequest(c.req.raw);
+    if (session) sessions.delete(session);
+    c.header(
+      'Set-Cookie',
+      `${sessionCookie}=; HttpOnly; SameSite=Strict; Path=/api; Max-Age=0`,
+    );
+    return c.json({ authenticated: false });
   });
   if (platform) app.route('/api', computerRoutes(platform.computers));
   if (platform)
