@@ -20,7 +20,10 @@ if [[ ! -f "$APP_DIR/package.json" || ! -f "$APP_DIR/package-lock.json" ]]; then
 fi
 
 echo "This installs OpenDots and selected helpers as native Ubuntu services. No Docker containers are used."
-read -r -p "Allow access from other devices on your LAN? [y/N] " expose_lan
+read -r -p "Allow access from other devices on your LAN? [Y/n] " expose_lan
+if [[ -z "$expose_lan" ]]; then
+  expose_lan="y"
+fi
 owner_password=""
 owner_password_confirm=""
 owner_password_hash=""
@@ -153,8 +156,12 @@ systemctl daemon-reload
 systemctl enable opendots.service
 systemctl restart opendots.service
 echo
-echo "OpenDots is installed and running. Open http://localhost:4310, then add a model connection in Settings."
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
   echo "LAN access is enabled. Sign in with the OpenDots password you set during installation."
+  access_ip="$(hostname -I | awk '{print $1}')"
+  echo "Open http://${access_ip:-localhost}:4310 from another device on your LAN."
+else
+  echo "OpenDots is installed and running locally. Open http://localhost:4310."
 fi
+echo "Then add a model connection in Settings."
 echo "Optional harnesses are installed from Settings → Harnesses; choose only the ones you want."

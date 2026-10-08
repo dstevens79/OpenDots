@@ -13,7 +13,7 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { type PlatformConfig } from './platform-config.js';
 import { authenticateOwnerPassword } from './owner-auth.js';
-const host = process.env.HOST ?? '127.0.0.1';
+const host = process.env.HOST ?? '0.0.0.0';
 const port = Number(process.env.PORT ?? 4310);
 const ownerToken = process.env.RUNTIME_TOKEN || process.env.OWNER_TOKEN;
 const ownerPasswordHash = process.env.OWNER_PASSWORD_HASH;

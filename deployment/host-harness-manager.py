@@ -19,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("OPENDOTS_HARNESSES_DIR", "/var/lib/opendots-harnesses"))
 TOKEN = os.environ["HARNESS_MANAGER_TOKEN"]
-HOST = os.environ.get("HARNESS_MANAGER_HOST", "0.0.0.0")
+HOST = os.environ.get("HARNESS_MANAGER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HARNESS_MANAGER_PORT", "4312"))
 LOCAL_COMPUTER_URL = os.environ.get("LOCAL_COMPUTER_URL", "http://127.0.0.1:4101")
 LOCAL_COMPUTER_TOKEN = os.environ.get("LOCAL_COMPUTER_TOKEN", "")
@@ -106,7 +106,7 @@ def start(name):
     if name == "hermes":
         home = path(name) / "home"
         home.mkdir(parents=True, exist_ok=True)
-        env.update({"HERMES_HOME": str(home), "API_SERVER_ENABLED": "true", "API_SERVER_HOST": "0.0.0.0", "API_SERVER_PORT": "8642"})
+        env.update({"HERMES_HOME": str(home), "API_SERVER_ENABLED": "true", "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": "8642"})
         if settings.get("apiKey"):
             env["OPENAI_API_KEY"] = settings["apiKey"]
         if settings.get("baseUrl"):
@@ -124,7 +124,7 @@ def start(name):
         env["OPENCODE_SERVER_PASSWORD"] = settings.setdefault("openCodePassword", secrets.token_urlsafe(24))
         write_settings(settings)
         executable = path(name) / "node_modules/.bin/opencode"
-        args = [str(executable), "serve", "--hostname", "0.0.0.0", "--port", "4096"]
+        args = [str(executable), "serve", "--hostname", "127.0.0.1", "--port", "4096"]
         cwd = workspace
     processes[name] = subprocess.Popen(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 
