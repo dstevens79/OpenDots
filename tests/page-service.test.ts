@@ -99,7 +99,7 @@ it('recovers the same reserved local thread after a restart lease', async () => 
   vi.restoreAllMocks();
   ws.close();
 });
-it('rejects a specialist in another Space before Intelligence is accessed', async () => {
+it('rejects a specialist in another Space before local history is accessed', async () => {
   const ws = new WorkspaceStore(':memory:', 'owner');
   const dot = ws.dots()[0];
   const space = ws.createSpace('Other', '');

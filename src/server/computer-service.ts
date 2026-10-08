@@ -38,6 +38,9 @@ export class ComputerService {
       this.config.computerToken?.trim()
     );
   }
+  get localChrome() {
+    return this.config.computerMode === 'local-chrome';
+  }
   private token(id: string) {
     return createHmac('sha256', this.config.computerToken!.trim())
       .update(`opendots-computer:${id}`)
@@ -58,6 +61,10 @@ export class ComputerService {
     const policy = this.workspace.computers.permissions(id);
     if (!policy.enabled || (kind && !policy[kind]))
       throw new Error('Computer permission is disabled.');
+    if (kind === 'shell' && this.config.computerMode === 'local-chrome')
+      throw new Error(
+        'Host terminal access is not available in local Chrome mode. Use an installed Harness for command-line tasks.',
+      );
     if (actor === 'agent' && this.paused())
       throw new Error('Agents are paused.');
   }
@@ -78,7 +85,7 @@ export class ComputerService {
         method: body === undefined ? 'GET' : 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${this.config.computerMode === 'local-chrome' ? this.config.computerSupervisorToken!.trim() : token}`,
           ...(dotId ? { 'x-openbot-bot-id': dotId } : {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -149,6 +156,10 @@ export class ComputerService {
     const expected = `${ns}-computer-${id}`;
     if (state.botId !== id || state.container !== expected)
       throw new Error('Computer identity mismatch.');
+    if (this.config.computerMode === 'local-chrome') {
+      const root = this.config.computerSupervisorUrl!.replace(/\/$/, '');
+      return new URL(`/computer/${id}/api`, root);
+    }
     const url = new URL(
       state.url ??
         (state.port
@@ -175,6 +186,10 @@ export class ComputerService {
     return url.origin;
   }
   private async existing(id: string, signal?: AbortSignal) {
+    if (this.config.computerMode === 'local-chrome')
+      return stateSchema.parse(
+        await this.supervisor(`/computer/${id}/health`, undefined, signal),
+      );
     const listing = z
       .object({ computers: z.array(stateSchema) })
       .parse(await this.supervisor('/computers', undefined, signal));
@@ -190,7 +205,10 @@ export class ComputerService {
     this.requireDot(id);
     const base = {
       configured: this.configured,
-      permissions: this.workspace.computers.permissions(id),
+      permissions: {
+        ...this.workspace.computers.permissions(id),
+        ...(this.localChrome ? { shell: false } : {}),
+      },
       audit: this.workspace.computers.audit(id),
     };
     if (!this.configured) return { ...base, state: 'not_configured' };
@@ -245,7 +263,13 @@ export class ComputerService {
   async start(id: string) {
     await this.audited(id, 'start', 'owner', async () => {
       this.allowed(id, undefined, 'owner');
-      this.endpoint(id, await this.supervisor(`/computers/${id}/ensure`, {}));
+      const state = await this.supervisor(
+        this.config.computerMode === 'local-chrome'
+          ? `/computer/${id}/start`
+          : `/computers/${id}/ensure`,
+        {},
+      );
+      this.endpoint(id, state);
     });
     return this.status(id);
   }
@@ -253,7 +277,12 @@ export class ComputerService {
     await this.audited(id, 'stop', 'owner', async () => {
       if (!this.configured)
         throw new Error('Computer service is not configured.');
-      await this.supervisor(`/computers/${id}/stop`, {});
+      await this.supervisor(
+        this.config.computerMode === 'local-chrome'
+          ? `/computer/${id}/stop`
+          : `/computers/${id}/stop`,
+        {},
+      );
     });
     return this.status(id);
   }

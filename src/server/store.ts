@@ -26,7 +26,6 @@ export class Store {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
-      CREATE TABLE IF NOT EXISTS setup_telemetry (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS provider_config (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, intervalSeconds INTEGER, nextRunAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, error TEXT, lease TEXT, leaseUntil INTEGER);
@@ -39,20 +38,6 @@ export class Store {
     this.db
       .prepare('INSERT OR IGNORE INTO settings VALUES (1, ?)')
       .run(JSON.stringify(defaults));
-  }
-  setupTelemetryState(): string | undefined {
-    return (
-      this.db.prepare('SELECT value FROM setup_telemetry WHERE id=1').get() as
-        { value: string } | undefined
-    )?.value;
-  }
-  saveSetupTelemetryState(value: string) {
-    this.db
-      .prepare('INSERT OR REPLACE INTO setup_telemetry VALUES (1, ?)')
-      .run(value);
-  }
-  clearSetupTelemetry() {
-    this.db.prepare('DELETE FROM setup_telemetry').run();
   }
   close() {
     this.db.close();
@@ -87,9 +72,23 @@ export class Store {
     fallback?: ProviderConfig,
   ): ProviderConfig {
     const current = this.providerConfig(fallback);
+    const connections = patch.connections?.map((connection) => {
+      const previous = current.connections?.find(
+        (item) => item.id === connection.id,
+      );
+      return {
+        ...connection,
+        apiKey: connection.apiKey?.trim()
+          ? connection.apiKey.trim()
+          : previous?.baseUrl === connection.baseUrl
+            ? previous.apiKey
+            : undefined,
+      };
+    });
     const next = {
       ...current,
       ...patch,
+      ...(connections ? { connections } : {}),
       apiKey: patch.apiKey?.trim()
         ? patch.apiKey.trim()
         : patch.baseUrl !== undefined && patch.baseUrl !== current.baseUrl
@@ -107,6 +106,12 @@ export class Store {
             patch.openCodeUrl !== current.openCodeUrl
           ? undefined
           : current.openCodePassword,
+      housekeepingApiKey: patch.housekeepingApiKey?.trim()
+        ? patch.housekeepingApiKey.trim()
+        : patch.housekeepingBaseUrl !== undefined &&
+            patch.housekeepingBaseUrl !== current.housekeepingBaseUrl
+          ? undefined
+          : current.housekeepingApiKey,
     };
     this.db
       .prepare('INSERT OR REPLACE INTO provider_config VALUES (1, ?)')
@@ -353,7 +358,14 @@ export class Store {
 }
 
 export interface ProviderConfig {
-  kind: 'omniroute' | 'hermes' | 'opencode' | 'custom';
+  kind:
+    | 'omniroute'
+    | 'openai'
+    | 'grok'
+    | 'gemini'
+    | 'hermes'
+    | 'opencode'
+    | 'custom';
   baseUrl: string;
   model: string;
   apiKey?: string;
@@ -363,4 +375,21 @@ export interface ProviderConfig {
   voiceBaseUrl?: string;
   openCodeUrl?: string;
   openCodePassword?: string;
+  housekeepingKind?:
+    'omniroute' | 'openai' | 'grok' | 'gemini' | 'hermes' | 'custom';
+  housekeepingBaseUrl?: string;
+  housekeepingModel?: string;
+  housekeepingApiKey?: string;
+  connections?: ModelConnection[];
+  residentConnectionId?: string;
+  housekeepingConnectionId?: string;
+}
+
+export interface ModelConnection {
+  id: string;
+  name: string;
+  kind: 'omniroute' | 'openai' | 'grok' | 'gemini' | 'hermes' | 'custom';
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
 }

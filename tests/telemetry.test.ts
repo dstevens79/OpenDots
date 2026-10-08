@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
 
@@ -25,8 +24,7 @@ const store = new Store(':memory:');
 const workspace = new WorkspaceStore(':memory:', 'fixture-owner');
 try {
   const platform = new Platform(store, workspace, {
-    intelligenceKey: 'test-project-key-never-sent',
-    baseUrl: '', runtimeUrl: '', voiceName: 'marin', slackUsers: [],
+    baseUrl: '', runtimeUrl: '', voiceName: 'marin',
   });
   await platform.handle(new Request('http://localhost/api/copilotkit/info'));
   const dot = workspace.dots()[0];
@@ -124,18 +122,6 @@ it.each([
   ['COPILOTKIT_TELEMETRY_SAMPLE_RATE', '0'],
 ])('respects %s=%s', async (key, value) => {
   expect(await captureRuntime({ [key]: value })).toEqual([]);
-});
-
-it('forwards the CLI identity and both opt-outs into the Docker app', async () => {
-  const compose = await readFile(
-    new URL('../compose.yml', import.meta.url),
-    'utf8',
-  );
-  expect(compose).toContain('CPK_TELEMETRY_ID: ${CPK_TELEMETRY_ID:-}');
-  expect(compose).toContain('DO_NOT_TRACK: ${DO_NOT_TRACK:-1}');
-  expect(compose).toContain(
-    'COPILOTKIT_TELEMETRY_DISABLED: ${COPILOTKIT_TELEMETRY_DISABLED:-true}',
-  );
 });
 
 it('hands the persistent installation fallback to the installed runtime when CLI identity is absent', async () => {

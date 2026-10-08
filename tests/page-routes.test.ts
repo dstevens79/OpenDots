@@ -17,7 +17,6 @@ function fixture(ownerToken?: string) {
   const platform = new Platform(store, ws, {
     baseUrl: config.baseUrl,
     voiceName: 'marin',
-    slackUsers: [],
     runtimeUrl: '',
   });
   return {
@@ -38,7 +37,7 @@ const request = (body: unknown, method = 'POST') => ({
   body: JSON.stringify(body),
 });
 
-it('saves Learning settings through the owner API and rejects malformed container IDs', async () => {
+it('rejects obsolete hosted Learning settings through the owner API', async () => {
   const { ws, app } = fixture();
   const dot = ws.dots()[0];
   const body = {
@@ -46,29 +45,12 @@ it('saves Learning settings through the owner API and rejects malformed containe
     instructions: dot.instructions,
     researchAllowed: true,
     memoryAllowed: true,
-    learningContainerId: 'research',
-    skillDeliveryEnabled: true,
   };
   expect(
-    (await app.request(`/api/dots/${dot.id}`, request(body, 'PUT'))).status,
-  ).toBe(200);
-  expect(ws.dot(dot.id)).toMatchObject({
-    learningContainerId: 'research',
-    skillDeliveryEnabled: true,
-  });
-  expect(
     (
       await app.request(
         `/api/dots/${dot.id}`,
-        request({ ...body, learningContainerId: 'bad--id' }, 'PUT'),
-      )
-    ).status,
-  ).toBe(400);
-  expect(
-    (
-      await app.request(
-        `/api/dots/${dot.id}`,
-        request({ ...body, learningContainerId: null }, 'PUT'),
+        request({ ...body, learningContainerId: 'research' }, 'PUT'),
       )
     ).status,
   ).toBe(400);
@@ -77,10 +59,6 @@ it('saves Learning settings through the owner API and rejects malformed containe
     request({ ...body, spaceId: dot.spaceId }),
   );
   expect(created.status).toBe(201);
-  expect(await created.json()).toMatchObject({
-    learningContainerId: 'research',
-    skillDeliveryEnabled: true,
-  });
   const privateApp = fixture('owner-secret');
   expect(
     (
@@ -422,7 +400,7 @@ it('keeps real Intelligence failures as 503 without exposing details', async () 
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual({
     error:
-      'Page operation could not complete. Check Intelligence setup or retry; your draft has not been discarded.',
+      'Page operation could not complete. Check the model connection or retry; your draft has not been discarded.',
   });
 });
 

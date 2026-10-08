@@ -22,7 +22,6 @@ function fixture() {
     voiceModel: 'voice-model',
     voiceName: 'marin',
     runtimeUrl: '',
-    slackUsers: [],
   };
   const turn = vi.fn(
     async (_thread: string, _prompt: string, _signal: AbortSignal) =>
@@ -46,10 +45,8 @@ function fixture() {
       requireReady() {},
       setup: () => ({
         voice: true,
-        intelligence: true,
         model: true,
         browser: false,
-        slack: 'not_configured',
         missing: [],
       }),
     },
@@ -179,9 +176,7 @@ it('defers paused transcript synchronization and resumes it once without a dupli
   expect(f.workspace.call(call.id).transcript).toBe(
     'Speech saved while paused',
   );
-  expect(f.workspace.call(call.id).error).toContain(
-    'pending Intelligence sync',
-  );
+  expect(f.workspace.call(call.id).error).toContain('saved locally');
   f.store.updateSettings({ paused: false });
   await f.voice.resumePending();
   await f.voice.resumePending();

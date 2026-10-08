@@ -1,27 +1,17 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { AgentSubscriber } from '@ag-ui/client';
 import { runThreadTurn } from '../src/server/headless.js';
+
 const sdk = vi.hoisted(() => ({
   run: vi.fn(),
   detach: vi.fn(),
   abort: vi.fn(),
   message: vi.fn(),
   config: vi.fn(),
-  thread: vi.fn(),
-  unsubscribe: vi.fn(),
-  subscriber: undefined as AgentSubscriber | undefined,
 }));
-vi.mock('@copilotkit/core', () => ({
-  IntelligenceAgent: class {
-    set threadId(id: string) {
-      sdk.thread(id);
-    }
+vi.mock('@ag-ui/client', () => ({
+  HttpAgent: class {
     constructor(config: unknown) {
       sdk.config(config);
-    }
-    subscribe(subscriber: AgentSubscriber) {
-      sdk.subscriber = subscriber;
-      return { unsubscribe: sdk.unsubscribe };
     }
     addMessage(message: unknown) {
       sdk.message(message);
@@ -37,30 +27,19 @@ vi.mock('@copilotkit/core', () => ({
     }
   },
 }));
-beforeEach(() => {
-  vi.clearAllMocks();
-  sdk.subscriber = undefined;
-});
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-it('executes server turns without browser-only Core discovery and tears down the SDK stream', async () => {
-  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-    Response.json({
-      mode: 'intelligence',
-      intelligence: { wsUrl: 'wss://example.com/client' },
-      agents: { dot: {} },
-    }),
-  );
-  vi.stubGlobal('fetch', fetcher);
+
+beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.unstubAllGlobals());
+
+it('runs server turns through the local AG-UI HTTP endpoint', async () => {
   sdk.run.mockResolvedValue({
     newMessages: [
       { id: 'reply', role: 'assistant', content: 'Confirmed receipt' },
     ],
   });
-  expect(
-    await runThreadTurn(
-      'https://runtime.test',
+  await expect(
+    runThreadTurn(
+      'http://127.0.0.1:4310/api/copilotkit/',
       { Authorization: 'Bearer test' },
       'dot',
       'thread',
@@ -68,16 +47,13 @@ it('executes server turns without browser-only Core discovery and tears down the
       new AbortController().signal,
       { opendotsSource: 'voice_receipt' },
     ),
-  ).toBe('Confirmed receipt');
-  expect(fetcher).toHaveBeenCalledWith(
-    'https://runtime.test/info',
-    expect.objectContaining({ headers: { Authorization: 'Bearer test' } }),
-  );
+  ).resolves.toBe('Confirmed receipt');
   expect(sdk.config).toHaveBeenCalledWith(
     expect.objectContaining({
       agentId: 'dot',
-      runtimeUrl: 'https://runtime.test',
-      url: 'wss://example.com/client',
+      threadId: 'thread',
+      url: 'http://127.0.0.1:4310/api/copilotkit/agent/dot/run',
+      headers: { Authorization: 'Bearer test' },
     }),
   );
   expect(sdk.message).toHaveBeenCalledWith(
@@ -88,21 +64,10 @@ it('executes server turns without browser-only Core discovery and tears down the
       metadata: { opendotsSource: 'voice_receipt' },
     }),
   );
-  expect(sdk.thread).toHaveBeenCalledWith('thread');
-  expect(sdk.unsubscribe).toHaveBeenCalledOnce();
   expect(sdk.detach).toHaveBeenCalledOnce();
 });
-it('marks scheduled user prompts while preserving their text and user role', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
-        mode: 'intelligence',
-        intelligence: { wsUrl: 'wss://example.com/client' },
-        agents: { dot: {} },
-      }),
-    ),
-  );
+
+it('marks scheduled prompts while preserving their text and user role', async () => {
   sdk.run.mockResolvedValue({
     newMessages: [
       { id: 'reply', role: 'assistant', content: 'Scheduled task complete' },
@@ -110,7 +75,7 @@ it('marks scheduled user prompts while preserving their text and user role', asy
   });
 
   await runThreadTurn(
-    'https://runtime.test',
+    'http://127.0.0.1:4310/api/copilotkit',
     {},
     'dot',
     'thread',
@@ -128,59 +93,25 @@ it('marks scheduled user prompts while preserving their text and user role', asy
     }),
   );
 });
-it('rejects failed runtime discovery instead of waiting for browser status indefinitely', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response(null, { status: 403 })),
-  );
+
+it('rejects an empty assistant response and always tears down the local run', async () => {
+  sdk.run.mockResolvedValue({
+    newMessages: [{ id: 'user', role: 'user', content: 'hello' }],
+  });
   await expect(
     runThreadTurn(
-      'https://runtime.test',
+      'http://127.0.0.1:4310/api/copilotkit',
       {},
       'dot',
       'thread',
       'Call',
       new AbortController().signal,
     ),
-  ).rejects.toThrow('HTTP 403');
-  expect(sdk.run).not.toHaveBeenCalled();
-});
-it('rejects a Dot missing from runtime metadata', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
-        mode: 'intelligence',
-        intelligence: { wsUrl: 'wss://example.com' },
-        agents: {},
-      }),
-    ),
-  );
-  await expect(
-    runThreadTurn(
-      'https://runtime.test',
-      {},
-      'dot',
-      'thread',
-      'Call',
-      new AbortController().signal,
-    ),
-  ).rejects.toThrow('Dot is unavailable');
+  ).rejects.toThrow('no assistant response');
+  expect(sdk.detach).toHaveBeenCalledOnce();
 });
 
-it('aborts the running SDK turn and releases the subscriber on cancellation', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
-        mode: 'intelligence',
-        intelligence: { wsUrl: 'wss://example.com/client' },
-        agents: { dot: {} },
-      }),
-    ),
-  );
+it('aborts the local HTTP turn when its owner operation is cancelled', async () => {
   const controller = new AbortController();
   sdk.run.mockImplementation(async () => {
     controller.abort(new Error('Call ended'));
@@ -190,7 +121,7 @@ it('aborts the running SDK turn and releases the subscriber on cancellation', as
   });
   await expect(
     runThreadTurn(
-      'https://runtime.test',
+      'http://127.0.0.1:4310/api/copilotkit',
       {},
       'dot',
       'thread',
@@ -199,33 +130,20 @@ it('aborts the running SDK turn and releases the subscriber on cancellation', as
     ),
   ).rejects.toThrow('Call ended');
   expect(sdk.abort).toHaveBeenCalledOnce();
-  expect(sdk.unsubscribe).toHaveBeenCalledOnce();
   expect(sdk.detach).toHaveBeenCalledOnce();
-  controller.abort();
-  expect(sdk.abort).toHaveBeenCalledOnce();
 });
-it('cleans up rejected SDK turns while preserving the error', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
-        mode: 'intelligence',
-        intelligence: { wsUrl: 'wss://example.com/client' },
-        agents: { dot: {} },
-      }),
-    ),
-  );
-  sdk.run.mockRejectedValue(new Error('Runtime socket failed'));
+
+it('cleans up rejected server turns while preserving the error', async () => {
+  sdk.run.mockRejectedValue(new Error('Local SSE run failed'));
   await expect(
     runThreadTurn(
-      'https://runtime.test',
+      'http://127.0.0.1:4310/api/copilotkit',
       {},
       'dot',
       'thread',
       'Call',
       new AbortController().signal,
     ),
-  ).rejects.toThrow('Runtime socket failed');
-  expect(sdk.unsubscribe).toHaveBeenCalledOnce();
+  ).rejects.toThrow('Local SSE run failed');
   expect(sdk.detach).toHaveBeenCalledOnce();
 });

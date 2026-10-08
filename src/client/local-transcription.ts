@@ -91,3 +91,10 @@ export async function transcribeAudio(
 }
 
 export const localTranscriptionModel = selectedModel;
+
+export async function prepareLocalTranscriptionModel(
+  onProgress: (message: string) => void = () => {},
+): Promise<string> {
+  await transcriber(onProgress);
+  return selectedModel();
+}

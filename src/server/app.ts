@@ -28,6 +28,33 @@ export function createApp({
   platform,
 }: AppOptions) {
   const app = new Hono();
+  const managerUrl = (process.env.HARNESS_MANAGER_URL || '').replace(/\/$/, '');
+  const managerToken = process.env.HARNESS_MANAGER_TOKEN || '';
+  const requestHarnessManager = async <T extends Record<string, unknown>>(
+    path: string,
+    body?: unknown,
+  ): Promise<T> => {
+    if (!managerUrl || !managerToken)
+      throw new Error('Host harness service is not configured.');
+    const response = await fetch(`${managerUrl}${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: {
+        Authorization: `Bearer ${managerToken}`,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(35_000),
+    });
+    const result = (await response.json().catch(() => ({}))) as T & {
+      error?: string;
+    };
+    if (!response.ok)
+      throw new Error(
+        result.error ||
+          `Host harness service returned HTTP ${response.status}.`,
+      );
+    return result;
+  };
   app.use(
     '/api/*',
     bodyLimit({
@@ -206,8 +233,8 @@ export function createApp({
     else void voice?.resumePending();
     return c.json(settings);
   });
-  app.get('/api/provider-settings', (c) => {
-    const current = platform?.store.providerConfig({
+  app.get('/api/provider-settings', async (c) => {
+    let current = platform?.store.providerConfig({
       kind: 'omniroute',
       baseUrl: platform.config.baseUrl,
       model: platform.config.model ?? '',
@@ -216,6 +243,72 @@ export function createApp({
       voiceKey: platform.config.voiceKey,
       voiceName: platform.config.voiceName,
     }) ?? { kind: 'custom' as const, baseUrl: '', model: '' };
+    if (platform && !current.connections?.length) {
+      const residentId = 'connection-resident';
+      const connections = current.baseUrl
+        ? [
+            {
+              id: residentId,
+              name:
+                current.kind === 'omniroute'
+                  ? 'OmniRoute'
+                  : 'Resident endpoint',
+              kind: current.kind === 'opencode' ? 'custom' : current.kind,
+              baseUrl: current.baseUrl,
+              model: current.model,
+              apiKey: current.apiKey,
+            },
+          ]
+        : [];
+      const housekeepingId = current.housekeepingBaseUrl
+        ? 'connection-housekeeping'
+        : residentId;
+      if (current.housekeepingBaseUrl)
+        connections.push({
+          id: housekeepingId,
+          name: 'Housekeeping endpoint',
+          kind:
+            current.housekeepingKind ??
+            (current.kind === 'opencode' ? 'custom' : current.kind),
+          baseUrl: current.housekeepingBaseUrl,
+          model: current.housekeepingModel ?? '',
+          apiKey: current.housekeepingApiKey,
+        });
+      current = platform.store.updateProviderConfig({
+        connections,
+        residentConnectionId: connections.length ? residentId : undefined,
+        housekeepingConnectionId: connections.length
+          ? housekeepingId
+          : undefined,
+      });
+    }
+    if (platform && current.connections?.length) {
+      try {
+        const credentials = await requestHarnessManager<{
+          hermesKey?: string;
+        }>('/credentials');
+        const configured = current.connections.map((connection) =>
+          connection.kind === 'hermes' &&
+          !connection.apiKey &&
+          connection.baseUrl ===
+            (process.env.HERMES_PUBLIC_URL || 'http://127.0.0.1:8642/v1') &&
+          credentials.hermesKey
+            ? { ...connection, apiKey: credentials.hermesKey }
+            : connection,
+        );
+        if (
+          configured.some(
+            (connection, index) =>
+              connection.apiKey !== current.connections?.[index]?.apiKey,
+          )
+        )
+          current = platform.store.updateProviderConfig({
+            connections: configured,
+          });
+      } catch {
+        // A custom or not-yet-installed Hermes connection remains editable.
+      }
+    }
     return c.json({
       kind: current.kind,
       baseUrl: current.baseUrl,
@@ -227,6 +320,21 @@ export function createApp({
       voiceBaseUrl: current.voiceBaseUrl ?? '',
       openCodeUrl: current.openCodeUrl ?? '',
       hasOpenCodePassword: !!current.openCodePassword,
+      housekeepingKind: current.housekeepingKind ?? 'omniroute',
+      housekeepingBaseUrl: current.housekeepingBaseUrl ?? '',
+      housekeepingModel: current.housekeepingModel ?? '',
+      hasHousekeepingApiKey: !!current.housekeepingApiKey,
+      residentConnectionId:
+        current.residentConnectionId ?? current.connections?.[0]?.id ?? '',
+      housekeepingConnectionId:
+        current.housekeepingConnectionId ?? current.residentConnectionId ?? '',
+      connections: (current.connections ?? []).map(
+        ({ apiKey, ...connection }) => ({
+          ...connection,
+          hasApiKey: !!apiKey,
+          apiKey: '',
+        }),
+      ),
     });
   });
   app.patch('/api/provider-settings', async (c) => {
@@ -234,7 +342,17 @@ export function createApp({
       return c.json({ error: 'Live model configuration is unavailable.' }, 503);
     const parsed = z
       .object({
-        kind: z.enum(['omniroute', 'hermes', 'opencode', 'custom']).optional(),
+        kind: z
+          .enum([
+            'omniroute',
+            'openai',
+            'grok',
+            'gemini',
+            'hermes',
+            'opencode',
+            'custom',
+          ])
+          .optional(),
         baseUrl: z.string().trim().max(2048).optional(),
         model: z.string().trim().max(256).optional(),
         apiKey: z.string().max(4096).optional(),
@@ -244,6 +362,35 @@ export function createApp({
         voiceBaseUrl: z.string().trim().max(2048).optional(),
         openCodeUrl: z.string().trim().max(2048).optional(),
         openCodePassword: z.string().max(4096).optional(),
+        housekeepingKind: z
+          .enum(['omniroute', 'openai', 'grok', 'gemini', 'hermes', 'custom'])
+          .optional(),
+        housekeepingBaseUrl: z.string().trim().max(2048).optional(),
+        housekeepingModel: z.string().trim().max(256).optional(),
+        housekeepingApiKey: z.string().max(4096).optional(),
+        residentConnectionId: z.string().trim().max(80).optional(),
+        housekeepingConnectionId: z.string().trim().max(80).optional(),
+        connections: z
+          .array(
+            z.object({
+              id: z.string().trim().min(1).max(80),
+              name: z.string().trim().min(1).max(80),
+              kind: z.enum([
+                'omniroute',
+                'openai',
+                'grok',
+                'gemini',
+                'hermes',
+                'custom',
+              ]),
+              baseUrl: z.string().trim().min(1).max(2048),
+              model: z.string().trim().max(256),
+              apiKey: z.string().max(4096).optional(),
+              hasApiKey: z.boolean().optional(),
+            }),
+          )
+          .max(32)
+          .optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
@@ -267,7 +414,72 @@ export function createApp({
         { error: 'Use an http:// or https:// OpenCode server URL.' },
         400,
       );
-    const provider = platform.store.updateProviderConfig(parsed.data, {
+    if (
+      parsed.data.housekeepingBaseUrl &&
+      !/^https?:\/\//i.test(parsed.data.housekeepingBaseUrl)
+    )
+      return c.json(
+        { error: 'Use an http:// or https:// housekeeping endpoint URL.' },
+        400,
+      );
+    for (const connection of parsed.data.connections ?? [])
+      if (!/^https?:\/\//i.test(connection.baseUrl))
+        return c.json(
+          { error: `Use an http:// or https:// URL for ${connection.name}.` },
+          400,
+        );
+    if (
+      parsed.data.connections &&
+      new Set(parsed.data.connections.map((connection) => connection.id))
+        .size !== parsed.data.connections.length
+    )
+      return c.json({ error: 'Each saved connection needs a unique ID.' }, 400);
+    if (
+      parsed.data.connections &&
+      [
+        parsed.data.residentConnectionId,
+        parsed.data.housekeepingConnectionId,
+      ].some(
+        (id) => id && !parsed.data.connections?.some((item) => item.id === id),
+      )
+    )
+      return c.json(
+        { error: 'Each model role must select a saved connection.' },
+        400,
+      );
+    const providerPatch = { ...parsed.data };
+    const managedHermesUrl =
+      process.env.HERMES_PUBLIC_URL || 'http://127.0.0.1:8642/v1';
+    if (
+      providerPatch.kind === 'hermes' &&
+      providerPatch.baseUrl === managedHermesUrl &&
+      !providerPatch.apiKey
+    ) {
+      try {
+        const credentials = await requestHarnessManager<{
+          hermesKey?: string;
+        }>('/credentials');
+        if (credentials.hermesKey) providerPatch.apiKey = credentials.hermesKey;
+      } catch {
+        // A custom Hermes endpoint can be saved before the managed service is installed.
+      }
+    }
+    if (
+      providerPatch.housekeepingKind === 'hermes' &&
+      providerPatch.housekeepingBaseUrl === managedHermesUrl &&
+      !providerPatch.housekeepingApiKey
+    ) {
+      try {
+        const credentials = await requestHarnessManager<{
+          hermesKey?: string;
+        }>('/credentials');
+        if (credentials.hermesKey)
+          providerPatch.housekeepingApiKey = credentials.hermesKey;
+      } catch {
+        // A custom housekeeping endpoint can be saved before the managed service is installed.
+      }
+    }
+    const provider = platform.store.updateProviderConfig(providerPatch, {
       kind: 'omniroute',
       baseUrl: platform.config.baseUrl,
       model: platform.config.model ?? '',
@@ -276,6 +488,11 @@ export function createApp({
       voiceKey: platform.config.voiceKey,
       voiceName: platform.config.voiceName,
     });
+    try {
+      await requestHarnessManager('/configure', provider);
+    } catch {
+      // Host harnesses can be installed later; provider settings remain usable without them.
+    }
     return c.json({
       kind: provider.kind,
       baseUrl: provider.baseUrl,
@@ -287,6 +504,19 @@ export function createApp({
       voiceBaseUrl: provider.voiceBaseUrl ?? '',
       openCodeUrl: provider.openCodeUrl ?? '',
       hasOpenCodePassword: !!provider.openCodePassword,
+      housekeepingKind: provider.housekeepingKind ?? 'omniroute',
+      housekeepingBaseUrl: provider.housekeepingBaseUrl ?? '',
+      housekeepingModel: provider.housekeepingModel ?? '',
+      hasHousekeepingApiKey: !!provider.housekeepingApiKey,
+      residentConnectionId: provider.residentConnectionId ?? '',
+      housekeepingConnectionId: provider.housekeepingConnectionId ?? '',
+      connections: (provider.connections ?? []).map(
+        ({ apiKey, ...connection }) => ({
+          ...connection,
+          hasApiKey: !!apiKey,
+          apiKey: '',
+        }),
+      ),
     });
   });
   app.post('/api/provider-settings/test', async (c) => {
@@ -294,11 +524,18 @@ export function createApp({
       return c.json({ error: 'Live model configuration is unavailable.' }, 503);
     const request = z
       .object({
-        target: z.enum(['chat', 'opencode']).default('chat'),
+        target: z
+          .enum(['chat', 'connection', 'housekeeping', 'voice', 'opencode'])
+          .default('chat'),
+        connectionId: z.string().optional(),
         baseUrl: z.string().optional(),
         apiKey: z.string().optional(),
         openCodeUrl: z.string().optional(),
         openCodePassword: z.string().optional(),
+        housekeepingBaseUrl: z.string().optional(),
+        housekeepingApiKey: z.string().optional(),
+        voiceBaseUrl: z.string().optional(),
+        voiceKey: z.string().optional(),
       })
       .safeParse(await c.req.json().catch(() => ({})));
     if (!request.success) return c.json({ error: 'Invalid test target.' }, 400);
@@ -308,15 +545,33 @@ export function createApp({
       model: platform.config.model ?? '',
       apiKey: platform.config.apiKey,
     });
+    const selectedConnection = provider.connections?.find(
+      (item) => item.id === request.data.connectionId,
+    );
     const url =
       request.data.target === 'opencode'
         ? (request.data.openCodeUrl ?? provider.openCodeUrl)
-        : (request.data.baseUrl ?? provider.baseUrl);
+        : request.data.target === 'connection'
+          ? (selectedConnection?.baseUrl ?? '')
+          : request.data.target === 'housekeeping'
+            ? (request.data.housekeepingBaseUrl ?? provider.housekeepingBaseUrl)
+            : request.data.target === 'voice'
+              ? (request.data.voiceBaseUrl ?? provider.voiceBaseUrl)
+              : (request.data.baseUrl ?? provider.baseUrl);
     const authKey =
       request.data.target === 'opencode'
-        ? (request.data.openCodePassword ?? provider.openCodePassword)
-        : (request.data.apiKey ?? provider.apiKey);
+        ? request.data.openCodePassword?.trim() || provider.openCodePassword
+        : request.data.target === 'connection'
+          ? selectedConnection?.apiKey
+          : request.data.target === 'housekeeping'
+            ? request.data.housekeepingApiKey?.trim() ||
+              provider.housekeepingApiKey ||
+              provider.apiKey
+            : request.data.target === 'voice'
+              ? request.data.voiceKey?.trim() || provider.voiceKey
+              : request.data.apiKey?.trim() || provider.apiKey;
     if (!url) return c.json({ error: 'Enter an endpoint URL first.' }, 400);
+    const resolvedAuthKey = authKey;
     try {
       const base = url.replace(/\/$/, '');
       const response = await fetch(
@@ -325,12 +580,12 @@ export function createApp({
           : `${base}/models`,
         {
           headers:
-            request.data.target === 'opencode' && authKey
+            request.data.target === 'opencode' && resolvedAuthKey
               ? {
-                  Authorization: `Basic ${Buffer.from(`opencode:${authKey}`).toString('base64')}`,
+                  Authorization: `Basic ${Buffer.from(`opencode:${resolvedAuthKey}`).toString('base64')}`,
                 }
-              : authKey
-                ? { Authorization: `Bearer ${authKey}` }
+              : resolvedAuthKey
+                ? { Authorization: `Bearer ${resolvedAuthKey}` }
                 : {},
           signal: AbortSignal.timeout(8000),
         },
@@ -341,11 +596,17 @@ export function createApp({
           502,
         );
       const data = (await response.json().catch(() => null)) as {
-        data?: unknown[];
+        data?: { id?: unknown }[];
         healthy?: boolean;
       } | null;
+      const models = Array.isArray(data?.data)
+        ? data.data
+            .map((entry) => entry.id)
+            .filter((id): id is string => typeof id === 'string')
+        : [];
       return c.json({
         ok: true,
+        models,
         detail:
           request.data.target === 'opencode'
             ? 'OpenCode server is reachable.'
@@ -362,6 +623,158 @@ export function createApp({
         502,
       );
     }
+  });
+  app.get('/api/local-harnesses', async (c) => {
+    try {
+      const status =
+        await requestHarnessManager<Record<string, unknown>>('/status');
+      const credentials = await requestHarnessManager<{
+        hermesKey?: string;
+        openCodePassword?: string;
+      }>('/credentials');
+      const current = store.providerConfig();
+      const hermesUrl =
+        process.env.HERMES_PUBLIC_URL || 'http://127.0.0.1:8642/v1';
+      const openCodeUrl =
+        process.env.OPENCODE_PUBLIC_URL || 'http://127.0.0.1:4096';
+      const patch: Record<string, string> = {};
+      if (
+        !current.openCodeUrl &&
+        (status.opencode as { installed?: boolean } | undefined)?.installed
+      ) {
+        patch.openCodeUrl = openCodeUrl;
+        if (credentials.openCodePassword)
+          patch.openCodePassword = credentials.openCodePassword;
+      }
+      if (
+        current.kind === 'hermes' &&
+        current.baseUrl === hermesUrl &&
+        !current.apiKey &&
+        credentials.hermesKey
+      )
+        patch.apiKey = credentials.hermesKey;
+      if (Object.keys(patch).length) store.updateProviderConfig(patch);
+      return c.json(status);
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Harness manager unavailable.',
+        },
+        503,
+      );
+    }
+  });
+  app.post('/api/local-harnesses/install', async (c) => {
+    const parsed = z
+      .object({
+        harness: z.enum(['hermes', 'opencode', 'gemini', 'codex', 'grok']),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Unknown local harness.' }, 400);
+    let result: { accepted: boolean; error?: string };
+    try {
+      result = await requestHarnessManager('/install', {
+        harness: parsed.data.harness,
+      });
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Harness manager unavailable.',
+        },
+        503,
+      );
+    }
+    return c.json(result, result.accepted ? 202 : 409);
+  });
+  app.post('/api/local-harnesses/start', async (c) => {
+    const parsed = z
+      .object({
+        harness: z.enum(['hermes', 'opencode', 'gemini', 'codex', 'grok']),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Unknown local harness.' }, 400);
+    let result: { accepted: boolean; error?: string };
+    try {
+      result = await requestHarnessManager('/start', {
+        harness: parsed.data.harness,
+      });
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Harness manager unavailable.',
+        },
+        503,
+      );
+    }
+    return c.json(result, result.accepted ? 200 : 404);
+  });
+  app.post('/api/local-harnesses/login', async (c) => {
+    const parsed = z
+      .object({ harness: z.enum(['codex', 'grok']) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json(
+        { error: 'Device sign-in is unavailable for this harness.' },
+        400,
+      );
+    let result: { accepted: boolean; error?: string };
+    try {
+      result = await requestHarnessManager('/login', {
+        harness: parsed.data.harness,
+      });
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Harness manager unavailable.',
+        },
+        503,
+      );
+    }
+    return c.json(result, result.accepted ? 202 : 409);
+  });
+  app.post('/api/local-harnesses/test', async (c) => {
+    const parsed = z
+      .object({
+        harness: z.enum(['hermes', 'opencode', 'gemini', 'codex', 'grok']),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Unknown local harness.' }, 400);
+    let result: { ok: boolean; detail?: string; error?: string };
+    try {
+      result = await requestHarnessManager('/test', {
+        harness: parsed.data.harness,
+      });
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Harness manager unavailable.',
+        },
+        503,
+      );
+    }
+    return c.json(result, result.ok ? 200 : 502);
   });
   app.post('/api/memories', async (c) => {
     const parsed = z

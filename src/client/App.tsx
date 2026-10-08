@@ -32,7 +32,6 @@ import type {
   WorkspaceState,
 } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
-import { trackSetupStep } from './setup-telemetry';
 import {
   applyCaptureResult,
   applyRefreshResult,
@@ -204,17 +203,6 @@ export function App() {
     (item) => item.id === selectedThread && item.dotId === dot?.id,
   );
   const configured = !!workspace && workspace.setup.missing.length === 0;
-  const setupStep = workspace
-    ? dialog?.type === 'settings'
-      ? 'settings'
-      : configured
-        ? 'ready'
-        : 'setup_required'
-    : undefined;
-  useEffect(() => {
-    if (!setupStep) return;
-    return trackSetupStep(setupStep);
-  }, [setupStep]);
   const chooseDot = (next: Dot) => {
     setSelectedDot(next.id);
     setSelectedThread(
@@ -661,22 +649,11 @@ export function App() {
                       <div>
                         <strong>Connect your Dot</strong>
                         <p>
-                          Connect your model and conversation service in
-                          Settings to start chatting. Your Spaces and Dot
-                          preferences are ready to use.
-                        </p>
-                        <p>
-                          Setup and usage metadata is collected by default.{' '}
-                          <a
-                            href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP-TELEMETRY.md"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Tracking and opt-out details
-                          </a>
+                          Connect a model in Settings to start chatting. Your
+                          conversations and preferences stay on this machine.
                         </p>
                         <a
-                          href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP.md"
+                          href="https://github.com/dstevens79/OpenDots/blob/feat/self-hosted-sse-whisper/docs/SETUP.md"
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -741,10 +718,6 @@ export function App() {
                     ))}
                   </div>
                   <div className="connection-note">
-                    <span
-                      className={`online-dot ${workspace.setup.slack === 'online' ? '' : 'off'}`}
-                    />
-                    Slack · {workspace.setup.slack.replaceAll('_', ' ')}
                     <button
                       className="text-button"
                       onClick={() => setDialog({ type: 'settings' })}

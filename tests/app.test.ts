@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
 import { Runner } from '../src/server/runner.js';
 import type { Config } from '../src/server/research.js';
 import { resolveAppOrigins } from '../src/server/app-origin.js';
+import type { Platform } from '../src/server/platform.js';
 const stores: Store[] = [];
 const config: Config = { mode: 'sample', baseUrl: 'https://api.openai.com/v1' };
 function fixture(token?: string, origin?: string | string[]) {
@@ -21,8 +22,137 @@ const json = (body: unknown) => ({
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 });
-afterEach(() => stores.splice(0).forEach((store) => store.close()));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  stores.splice(0).forEach((store) => store.close());
+});
 describe('API boundaries', () => {
+  it('discovers model ids from an authenticated endpoint without returning secrets', async () => {
+    const store = new Store(':memory:');
+    stores.push(store);
+    store.updateProviderConfig({
+      kind: 'omniroute',
+      baseUrl: 'https://models.example/v1',
+      model: 'resident',
+      apiKey: 'secret-token',
+    });
+    const platform = {
+      store,
+      config: { ...config, apiKey: 'fallback-token' },
+    } as unknown as Platform;
+    const runner = new Runner(store, config);
+    const app = createApp({ store, runner, config, platform });
+    const fetchMock = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        expect(new Headers(init?.headers).get('Authorization')).toBe(
+          'Bearer secret-token',
+        );
+        return Response.json({
+          data: [{ id: 'resident' }, { id: 'housekeeper' }],
+        });
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const settings = await app.request('/api/provider-settings');
+    expect(JSON.stringify(await settings.json())).not.toContain('secret-token');
+    const response = await app.request(
+      '/api/provider-settings/test',
+      json({
+        target: 'chat',
+        baseUrl: 'https://models.example/v1',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      models: ['resident', 'housekeeper'],
+    });
+  });
+  it('serves named connection profiles without exposing their API keys', async () => {
+    const store = new Store(':memory:');
+    stores.push(store);
+    store.updateProviderConfig({
+      kind: 'omniroute',
+      baseUrl: 'https://legacy.example/v1',
+      model: 'legacy-model',
+      connections: [
+        {
+          id: 'gemini-free',
+          name: 'Gemini free tier',
+          kind: 'gemini',
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+          model: 'gemini-flash',
+          apiKey: 'private-gemini-key',
+        },
+      ],
+      residentConnectionId: 'gemini-free',
+      housekeepingConnectionId: 'gemini-free',
+    });
+    const platform = {
+      store,
+      config: { ...config },
+    } as unknown as Platform;
+    const runner = new Runner(store, config);
+    const app = createApp({ store, runner, config, platform });
+    const settings = await app.request('/api/provider-settings');
+    const body = (await settings.json()) as Record<string, unknown>;
+    expect(JSON.stringify(body)).not.toContain('private-gemini-key');
+    expect(body).toMatchObject({
+      residentConnectionId: 'gemini-free',
+      housekeepingConnectionId: 'gemini-free',
+      connections: [{ id: 'gemini-free', hasApiKey: true, apiKey: '' }],
+    });
+    const fetchMock = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        expect(new Headers(init?.headers).get('Authorization')).toBe(
+          'Bearer private-gemini-key',
+        );
+        return Response.json({ data: [{ id: 'gemini-flash' }] });
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const tested = await app.request(
+      '/api/provider-settings/test',
+      json({ target: 'connection', connectionId: 'gemini-free' }),
+    );
+    expect(tested.status).toBe(200);
+    expect(await tested.json()).toMatchObject({ models: ['gemini-flash'] });
+  });
+  it('rejects duplicate IDs in the shared connection registry', async () => {
+    const store = new Store(':memory:');
+    stores.push(store);
+    const platform = {
+      store,
+      config: { ...config },
+    } as unknown as Platform;
+    const runner = new Runner(store, config);
+    const app = createApp({ store, runner, config, platform });
+    const response = await app.request('/api/provider-settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        connections: [
+          {
+            id: 'duplicate',
+            name: 'First',
+            kind: 'custom',
+            baseUrl: 'https://one.example/v1',
+            model: 'model-a',
+          },
+          {
+            id: 'duplicate',
+            name: 'Second',
+            kind: 'custom',
+            baseUrl: 'https://two.example/v1',
+            model: 'model-b',
+          },
+        ],
+        residentConnectionId: 'duplicate',
+        housekeepingConnectionId: 'duplicate',
+      }),
+    });
+    expect(response.status).toBe(400);
+  });
   it('requires owner token for state and mutations when configured', async () => {
     const { app } = fixture('private-token');
     expect((await app.request('/api/state')).status).toBe(401);

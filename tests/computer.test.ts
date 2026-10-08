@@ -54,11 +54,11 @@ function fixture(deadline = 1000) {
   const config = {
     baseUrl: 'https://example.com',
     voiceName: 'voice',
-    slackUsers: [],
     runtimeUrl: 'http://localhost',
     computerSupervisorUrl: 'http://127.0.0.1:4312',
     computerSupervisorToken: 'supervisor-secret',
     computerToken: 'master-secret',
+    computerMode: 'managed' as 'managed' | 'local-chrome',
   };
   const service = new ComputerService(
     workspace,
@@ -148,6 +148,52 @@ it('status never provisions and actions use per-Dot derived credentials with aud
     new Headers(request.init?.headers).get('authorization'),
   );
   expect(last.url).toContain(other.id);
+});
+it('local Chrome computers route through the authenticated host manager', async () => {
+  const f = fixture();
+  f.config.computerMode = 'local-chrome';
+  f.handle(async (url) => {
+    if (url.endsWith('/health'))
+      return Response.json({
+        botId: f.id,
+        container: `opendots-computer-${f.id}`,
+        status: 'running',
+      });
+    if (url.endsWith('/api/control'))
+      return Response.json({
+        holder: 'bot',
+        requested: false,
+        transitioning: false,
+        resumeSnapshotRequired: false,
+      });
+    return Response.json({ text: 'local result' });
+  });
+  const status = await f.service.status(f.id);
+  expect(status.state).toBe('running');
+  expect(status.permissions.shell).toBe(false);
+  const tools = computerTools(
+    f.service,
+    f.id,
+    () => {},
+    new AbortController().signal,
+  );
+  expect(tools.some((tool) => tool.name === 'computer_exec')).toBe(false);
+  const health = f.calls.find((call) => call.url.endsWith('/health'))!;
+  expect(health.url).toContain(`/computer/${f.id}/health`);
+  expect(new Headers(health.init?.headers).get('authorization')).toBe(
+    'Bearer supervisor-secret',
+  );
+
+  const result = await f.service.action(f.id, 'read', {}, 'agent');
+  expect(result).toEqual({ text: 'local result' });
+  const action = f.calls.find((call) => call.url.endsWith('/api/read'))!;
+  expect(action.url).toContain(`/computer/${f.id}/api/read`);
+  expect(new Headers(action.init?.headers).get('authorization')).toBe(
+    'Bearer supervisor-secret',
+  );
+  await expect(
+    f.service.action(f.id, 'exec', { command: 'whoami' }),
+  ).rejects.toThrow('Host terminal access is not available');
 });
 it('rejects foreign targets, nonexistent Dots, traversal, unexpected inputs and agent human controls', async () => {
   const f = fixture();

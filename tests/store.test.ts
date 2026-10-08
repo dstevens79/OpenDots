@@ -41,19 +41,57 @@ describe('durable task lifecycle', () => {
       voiceKey: 'voice-secret',
       openCodeUrl: 'http://opencode:4096',
       openCodePassword: 'opencode-secret',
+      housekeepingKind: 'hermes',
+      housekeepingBaseUrl: 'http://hermes:8642/v1',
+      housekeepingModel: 'small-model',
+      housekeepingApiKey: 'housekeeping-secret',
     });
     const reopened = new Store(path);
     expect(reopened.providerConfig()).toMatchObject({
       kind: 'hermes',
       model: 'local-model',
       voiceModel: 'realtime-model',
+      housekeepingModel: 'small-model',
     });
     expect(JSON.stringify(reopened.settings())).not.toContain('server-secret');
     expect(JSON.stringify(reopened.settings())).not.toContain('voice-secret');
     reopened.updateProviderConfig({ baseUrl: 'http://different-host/v1' });
     expect(reopened.providerConfig().apiKey).toBeUndefined();
     expect(reopened.providerConfig().voiceKey).toBe('voice-secret');
+    expect(reopened.providerConfig().housekeepingApiKey).toBe(
+      'housekeeping-secret',
+    );
+    reopened.updateProviderConfig({
+      housekeepingBaseUrl: 'http://new-housekeeping:8642/v1',
+    });
+    expect(reopened.providerConfig().housekeepingApiKey).toBeUndefined();
     reopened.close();
+  });
+  it('preserves named connection secrets when a profile is saved blank', () => {
+    const { store } = fixture();
+    const connection = {
+      id: 'openai-primary',
+      name: 'OpenAI',
+      kind: 'openai' as const,
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-test',
+      apiKey: 'secret-value',
+    };
+    store.updateProviderConfig({
+      connections: [connection],
+      residentConnectionId: connection.id,
+      housekeepingConnectionId: connection.id,
+    });
+    store.updateProviderConfig({
+      connections: [{ ...connection, apiKey: '' }],
+    });
+    expect(store.providerConfig().connections?.[0].apiKey).toBe('secret-value');
+    store.updateProviderConfig({
+      connections: [
+        { ...connection, baseUrl: 'https://other.example/v1', apiKey: '' },
+      ],
+    });
+    expect(store.providerConfig().connections?.[0].apiKey).toBeUndefined();
   });
   it('claims each due job once even through separate database connections', () => {
     const { store, path } = fixture();

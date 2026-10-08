@@ -1,9 +1,8 @@
-// Self-hosted installs opt out of SDK telemetry unless an operator opts in.
+// Local history is the product's operational record; SDK telemetry stays opt-out by default.
 process.env.DO_NOT_TRACK ??= '1';
 process.env.COPILOTKIT_TELEMETRY_DISABLED ??= 'true';
 const { webSearchProvider } = await import('./parallel.js');
 import { createShutdown } from './shutdown.js';
-import { reportChannelFailure, safeFailure } from './slack-channel.js';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Store } from './store.js';
@@ -32,27 +31,32 @@ const workspace = new WorkspaceStore(
 const config: PlatformConfig = {
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_MODEL,
-  baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+  baseUrl: process.env.OPENAI_BASE_URL ?? '',
   webSearchProvider: webSearchProvider(
     process.env.WEB_SEARCH_PROVIDER ?? 'disabled',
   ),
   parallelApiKey: process.env.PARALLEL_API_KEY,
   browserUrl: process.env.BROWSER_URL,
   browserSecret: process.env.BROWSER_SECRET,
-  computerSupervisorUrl: process.env.COMPUTER_SUPERVISOR_URL,
-  computerSupervisorToken: process.env.COMPUTER_SUPERVISOR_TOKEN,
+  computerSupervisorUrl:
+    process.env.COMPUTER_SUPERVISOR_URL?.trim() ||
+    (process.env.COMPUTER_MODE === 'local-chrome'
+      ? process.env.HARNESS_MANAGER_URL
+      : undefined),
+  computerSupervisorToken:
+    process.env.COMPUTER_SUPERVISOR_TOKEN?.trim() ||
+    (process.env.COMPUTER_MODE === 'local-chrome'
+      ? process.env.HARNESS_MANAGER_TOKEN
+      : undefined),
   computerToken: process.env.COMPUTER_TOKEN,
   computerNamespace: process.env.COMPUTER_NAMESPACE,
+  computerMode:
+    process.env.COMPUTER_MODE === 'local-chrome' ? 'local-chrome' : 'managed',
+  harnessManagerUrl: process.env.HARNESS_MANAGER_URL,
+  harnessManagerToken: process.env.HARNESS_MANAGER_TOKEN,
   voiceKey: process.env.VOICE_API_KEY,
   voiceModel: process.env.VOICE_MODEL,
   voiceName: process.env.VOICE_NAME ?? 'marin',
-  slackChannel: process.env.SLACK_CHANNEL_NAME,
-  slackTeam: process.env.SLACK_TEAM_ID,
-  slackUsers: (process.env.SLACK_USER_IDS ?? '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean),
-  slackDotId: process.env.SLACK_DOT_ID || undefined,
   runtimeUrl: `http://${host === '::1' ? '[::1]' : '127.0.0.1'}:${port}/api/copilotkit`,
   ownerToken,
 };
@@ -83,9 +87,6 @@ const runner = new Runner(
     return { text, sources: [], sample: false };
   },
 );
-const wsOrigin = new URL(
-  config.intelligenceWsUrl ?? 'wss://realtime.intelligence.copilotkit.ai',
-).origin;
 const app = createApp({
   store,
   runner,
@@ -99,7 +100,7 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'no-referrer');
   c.header(
     'Content-Security-Policy',
-    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${wsOrigin}; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   );
   await next();
 });
@@ -109,26 +110,17 @@ app.get('*', serveStatic({ path: './dist/client/index.html' }));
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`OpenDots template listening on http://${host}:${info.port}`);
   runner.start();
-  void platform
-    .start()
-    .catch((error) =>
-      reportChannelFailure(
-        'Slack Channels activation failed; check setup status',
-        [safeFailure(error)],
-      ),
-    );
 });
 setInterval(() => platform.persistRuntimeHistory(), 2000).unref();
 const shutdown = createShutdown({
   stopRunner: () => runner.stop(),
-  stopPlatform: () => platform.stop(),
+  stopPlatform: async () => {},
   closeServer: () =>
     new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     ),
   exit: (code) => process.exit(code),
-  report: (operation, error) =>
-    reportChannelFailure(operation, [safeFailure(error)]),
+  report: (operation, error) => console.error(`${operation}: ${String(error)}`),
 });
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

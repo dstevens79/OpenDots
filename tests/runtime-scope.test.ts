@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { validateRuntimeScope } from '../src/server/runtime-scope.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { setupStatus } from '../src/server/platform-config.js';
-it('blocks unbound cross-Dot run and inspector routes before contacting Intelligence', () => {
+it('blocks unbound cross-Dot run and inspector routes before contacting the local runtime', () => {
   const store = new WorkspaceStore(':memory:', 'owner');
   const dot = store.dots()[0];
   store.bindThread('thread-a', dot.id, 'A');
@@ -37,12 +37,10 @@ it('reports local model setup without hosted Intelligence', () => {
   const status = setupStatus({
     baseUrl: '',
     voiceName: 'marin',
-    slackUsers: [],
     runtimeUrl: '',
   });
-  expect(status.intelligence).toBe(true);
   expect(status.voice).toBe(false);
-  expect(status.slack).toBe('not_configured');
+  expect(status.model).toBe(false);
   expect(status.missing).toContain('OPENAI_API_KEY');
   expect(status.missing).toContain('OPENAI_MODEL');
 });

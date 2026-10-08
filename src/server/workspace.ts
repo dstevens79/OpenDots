@@ -5,7 +5,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { validateLearningSettings } from '../shared/learning.js';
 import type { Message, BaseEvent } from '@ag-ui/client';
 import type { CallReceipt, Conversation, Dot, Space } from '../shared/types.js';
 export class WorkspaceStore {
@@ -27,19 +26,6 @@ export class WorkspaceStore {
       CREATE TABLE IF NOT EXISTS task_threads(taskId TEXT PRIMARY KEY, threadId TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS calls(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, startedAt INTEGER NOT NULL, endedAt INTEGER, status TEXT NOT NULL, transcript TEXT NOT NULL, error TEXT);
       CREATE TABLE IF NOT EXISTS captures(threadId TEXT PRIMARY KEY, value TEXT NOT NULL);`);
-    for (const [table, column, definition] of [
-      ['dots', 'learningContainerId', 'TEXT'],
-      ['dots', 'skillDeliveryEnabled', 'INTEGER NOT NULL DEFAULT 0'],
-      ['thread_bindings', 'learningContainerId', 'TEXT'],
-    ]) {
-      if (
-        !this.db
-          .prepare(`PRAGMA table_info(${table})`)
-          .all()
-          .some((field) => field.name === column)
-      )
-        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-    }
     // Migrate only once: restarting must never restore a revoked grant.
     if (
       !this.db
@@ -104,7 +90,11 @@ export class WorkspaceStore {
       .prepare('SELECT * FROM dots ORDER BY createdAt')
       .all()
       .map((row) => ({
-        ...row,
+        id: String(row.id),
+        spaceId: String(row.spaceId),
+        name: String(row.name),
+        instructions: String(row.instructions),
+        createdAt: Number(row.createdAt),
         spaceIds: this.db
           .prepare(
             'SELECT spaceId FROM dot_spaces WHERE dotId=? ORDER BY spaceId',
@@ -113,7 +103,6 @@ export class WorkspaceStore {
           .map((grant) => String(grant.spaceId)),
         researchAllowed: !!row.researchAllowed,
         memoryAllowed: !!row.memoryAllowed,
-        skillDeliveryEnabled: !!row.skillDeliveryEnabled,
       })) as unknown as Dot[];
   }
   dot(id: string) {
@@ -126,11 +115,8 @@ export class WorkspaceStore {
     researchAllowed: boolean,
     memoryAllowed: boolean,
     spaceIds: string[] = [spaceId],
-    learningContainerId: string | null = null,
-    skillDeliveryEnabled = false,
   ): Dot {
     this.validateSpaceAccess(spaceId, spaceIds);
-    validateLearningSettings(learningContainerId, skillDeliveryEnabled);
     const dot: Dot = {
       id: randomUUID(),
       spaceId,
@@ -139,15 +125,13 @@ export class WorkspaceStore {
       instructions,
       researchAllowed,
       memoryAllowed,
-      learningContainerId,
-      skillDeliveryEnabled,
       createdAt: Date.now(),
     };
     this.db.exec('BEGIN');
     try {
       this.db
         .prepare(
-          'INSERT INTO dots (id, spaceId, name, instructions, researchAllowed, memoryAllowed, createdAt, learningContainerId, skillDeliveryEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO dots (id, spaceId, name, instructions, researchAllowed, memoryAllowed, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
         .run(
           dot.id,
@@ -157,8 +141,6 @@ export class WorkspaceStore {
           +researchAllowed,
           +memoryAllowed,
           dot.createdAt,
-          learningContainerId,
-          +skillDeliveryEnabled,
         );
       for (const id of dot.spaceIds)
         this.db.prepare('INSERT INTO dot_spaces VALUES (?, ?)').run(dot.id, id);
@@ -189,8 +171,6 @@ export class WorkspaceStore {
     > & {
       spaceId?: string;
       spaceIds?: string[];
-      learningContainerId?: string | null;
-      skillDeliveryEnabled?: boolean;
     },
   ): Dot {
     const current = this.dot(id);
@@ -198,26 +178,17 @@ export class WorkspaceStore {
     const defaultSpace = patch.spaceId ?? current.spaceId;
     const spaceIds = patch.spaceIds ?? current.spaceIds;
     this.validateSpaceAccess(defaultSpace, spaceIds);
-    const learningContainerId =
-      patch.learningContainerId === undefined
-        ? (current.learningContainerId ?? null)
-        : patch.learningContainerId;
-    const skillDeliveryEnabled =
-      patch.skillDeliveryEnabled ?? current.skillDeliveryEnabled ?? false;
-    validateLearningSettings(learningContainerId, skillDeliveryEnabled);
     this.db.exec('BEGIN');
     try {
       this.db
         .prepare(
-          'UPDATE dots SET name=?, instructions=?, researchAllowed=?, memoryAllowed=?, learningContainerId=?, skillDeliveryEnabled=? WHERE id=?',
+          'UPDATE dots SET name=?, instructions=?, researchAllowed=?, memoryAllowed=? WHERE id=?',
         )
         .run(
           patch.name,
           patch.instructions,
           +patch.researchAllowed,
           +patch.memoryAllowed,
-          learningContainerId,
-          +skillDeliveryEnabled,
           id,
         );
       this.db
@@ -236,7 +207,7 @@ export class WorkspaceStore {
   conversations(): Conversation[] {
     return this.db
       .prepare(
-        'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
+        'SELECT id, dotId, ownerId, title, createdAt FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
       )
       .all(this.ownerId) as unknown as Conversation[];
   }
@@ -249,20 +220,12 @@ export class WorkspaceStore {
       ownerId: this.ownerId,
       title,
       createdAt: Date.now(),
-      learningContainerId: dot.learningContainerId ?? null,
     };
     this.db
       .prepare(
-        'INSERT INTO thread_bindings (id, dotId, ownerId, title, createdAt, learningContainerId) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO thread_bindings (id, dotId, ownerId, title, createdAt) VALUES (?, ?, ?, ?, ?)',
       )
-      .run(
-        id,
-        dotId,
-        this.ownerId,
-        title,
-        value.createdAt,
-        value.learningContainerId ?? null,
-      );
+      .run(id, dotId, this.ownerId, title, value.createdAt);
     return value;
   }
   saveThreadSnapshot(id: string, messages: Message[], events: BaseEvent[]) {

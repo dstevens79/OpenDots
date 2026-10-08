@@ -16,14 +16,12 @@ import {
 } from '@copilotkit/runtime/v2';
 import type { Message, BaseEvent } from '@ag-ui/client';
 import { Observable } from 'rxjs';
-export { slackIdentity } from './slack-channel.js';
 import { Store } from './store.js';
 import { WorkspaceStore } from './workspace.js';
 import { DotAgent } from './dot-agent.js';
 import { runThreadTurn } from './headless.js';
 import { setupStatus, type PlatformConfig } from './platform-config.js';
 import { validateRuntimeScope } from './runtime-scope.js';
-import { SetupTelemetry } from './setup-telemetry.js';
 import { InMemoryAgentRunner } from '@copilotkit/runtime/v2';
 
 /** Local SSE runner with durable conversation snapshots in OpenDots' SQLite DB. */
@@ -142,8 +140,6 @@ class SQLiteAgentRunner extends AgentRunner {
   }
 }
 export class Platform {
-  private channelStartupFailed = false;
-  readonly setupTelemetry: SetupTelemetry;
   readonly pages: PageService;
   readonly computers: ComputerService;
   readonly connections: ConnectionService;
@@ -157,7 +153,6 @@ export class Platform {
     readonly workspace: WorkspaceStore,
     readonly config: PlatformConfig,
   ) {
-    this.setupTelemetry = new SetupTelemetry(store);
     this.computers = new ComputerService(
       workspace,
       config,
@@ -174,14 +169,7 @@ export class Platform {
             .dots()
             .map((dot) => [
               dot.id,
-              new DotAgent(
-                store,
-                workspace,
-                config,
-                dot.id,
-                false,
-                this.setupTelemetry,
-              ),
+              new DotAgent(store, workspace, config, dot.id, false),
             ]),
         ),
     }) as unknown as CopilotRuntimeLike;
@@ -201,18 +189,14 @@ export class Platform {
       voiceKey: this.config.voiceKey,
       voiceName: this.config.voiceName,
     });
-    return setupStatus(
-      {
-        ...this.config,
-        apiKey: provider.kind === 'opencode' ? undefined : provider.apiKey,
-        model: provider.kind === 'opencode' ? undefined : provider.model,
-        baseUrl: provider.baseUrl,
-        voiceKey: provider.voiceKey ?? this.config.voiceKey,
-        voiceModel: provider.voiceModel ?? this.config.voiceModel,
-      },
-      this.handler?.channels?.status().overall ?? 'not_configured',
-      this.channelStartupFailed,
-    );
+    return setupStatus({
+      ...this.config,
+      apiKey: provider.kind === 'opencode' ? undefined : provider.apiKey,
+      model: provider.kind === 'opencode' ? undefined : provider.model,
+      baseUrl: provider.baseUrl,
+      voiceKey: provider.voiceKey ?? this.config.voiceKey,
+      voiceModel: provider.voiceModel ?? this.config.voiceModel,
+    });
   }
   requireReady() {
     const missing = this.setup().missing;
@@ -220,12 +204,6 @@ export class Platform {
       throw new Error(
         `Setup required: ${missing.join(', ')}. Local conversations require model configuration.`,
       );
-  }
-  async start() {
-    // Self-hosted mode does not report setup activity to external telemetry.
-  }
-  async stop() {
-    await this.setupTelemetry.stop();
   }
   async createConversation(dotId: string, title: string) {
     this.requireReady();

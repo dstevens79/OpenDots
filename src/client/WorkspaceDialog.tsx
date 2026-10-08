@@ -54,18 +54,12 @@ export function WorkspaceDialog({
     dialog.type === 'dot' ? (dialog.dot?.spaceId ?? dialog.spaceId) : '',
   );
   const [interval, setInterval] = useState('86400');
-  const [learningContainer, setLearningContainer] = useState(
-    dialog.type === 'dot' ? (dialog.dot?.learningContainerId ?? '') : '',
-  );
-  const [skillDelivery, setSkillDelivery] = useState(
-    dialog.type === 'dot' ? (dialog.dot?.skillDeliveryEnabled ?? false) : false,
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState(themePreference);
-  const [mainTab, setMainTab] = useState<'connectivity' | 'voice' | 'general'>(
-    'connectivity',
-  );
+  const [mainTab, setMainTab] = useState<
+    'models' | 'connections' | 'harnesses' | 'voice' | 'general'
+  >('models');
   const [connectionTab, setConnectionTab] = useState<
     'omniroute' | 'local' | 'custom'
   >('omniroute');
@@ -83,7 +77,59 @@ export function WorkspaceDialog({
     openCodeUrl: '',
     openCodePassword: '',
     hasOpenCodePassword: false,
+    housekeepingKind: 'omniroute',
+    housekeepingBaseUrl: '',
+    housekeepingModel: '',
+    housekeepingApiKey: '',
+    hasHousekeepingApiKey: false,
+    residentConnectionId: '',
+    housekeepingConnectionId: '',
+    connections: [] as {
+      id: string;
+      name: string;
+      kind: 'omniroute' | 'openai' | 'grok' | 'gemini' | 'hermes' | 'custom';
+      baseUrl: string;
+      model: string;
+      apiKey: string;
+      hasApiKey: boolean;
+    }[],
   });
+  const [connectionEditorId, setConnectionEditorId] = useState('');
+  const [modelChoices, setModelChoices] = useState<string[]>([]);
+  const [housekeepingModelChoices, setHousekeepingModelChoices] = useState<
+    string[]
+  >([]);
+  const [voiceModelChoices, setVoiceModelChoices] = useState<string[]>([]);
+  const [harnesses, setHarnesses] = useState<{
+    hermes: {
+      installed: boolean;
+      running: boolean;
+      url: string;
+      model: string;
+      job: { state: string; message: string } | null;
+    };
+    opencode: {
+      installed: boolean;
+      running: boolean;
+      url: string;
+      job: { state: string; message: string } | null;
+    };
+    gemini: {
+      installed: boolean;
+      running: boolean;
+      job: { state: string; message: string } | null;
+    };
+    codex: {
+      installed: boolean;
+      running: boolean;
+      job: { state: string; message: string } | null;
+    };
+    grok: {
+      installed: boolean;
+      running: boolean;
+      job: { state: string; message: string } | null;
+    };
+  } | null>(null);
   const [whisperModel, setWhisperModel] = useState(
     () =>
       localStorage.getItem('opendots-whisper-model') ||
@@ -99,11 +145,16 @@ export function WorkspaceDialog({
           ...value,
           apiKey: '',
           voiceKey: '',
+          connections: (value.connections ?? []).map((connection) => ({
+            ...connection,
+            apiKey: '',
+          })),
         }));
+        setConnectionEditorId(value.connections?.[0]?.id ?? '');
         setConnectionTab(
           value.kind === 'custom'
             ? 'custom'
-            : value.kind === 'hermes' || value.kind === 'opencode'
+            : value.kind === 'hermes'
               ? 'local'
               : 'omniroute',
         );
@@ -112,6 +163,186 @@ export function WorkspaceDialog({
         setProviderNotice('Could not load saved provider settings.'),
       );
   }, [dialog.type]);
+  useEffect(() => {
+    if (dialog.type !== 'settings') return;
+    const refresh = () =>
+      void api<typeof harnesses>('/local-harnesses')
+        .then(setHarnesses)
+        .catch(() => setProviderNotice('Could not check local harnesses.'));
+    refresh();
+    const timer = window.setInterval(() => {
+      if (
+        harnesses?.hermes.job?.state === 'installing' ||
+        harnesses?.opencode.job?.state === 'installing' ||
+        harnesses?.gemini.job?.state === 'installing' ||
+        harnesses?.codex.job?.state === 'installing' ||
+        harnesses?.grok.job?.state === 'installing' ||
+        harnesses?.codex.job?.state === 'authenticating' ||
+        harnesses?.grok.job?.state === 'authenticating'
+      )
+        refresh();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [
+    dialog.type,
+    harnesses?.hermes.job?.state,
+    harnesses?.opencode.job?.state,
+    harnesses?.gemini.job?.state,
+    harnesses?.codex.job?.state,
+    harnesses?.grok.job?.state,
+  ]);
+  const harnessLabel: Record<
+    'hermes' | 'opencode' | 'gemini' | 'codex' | 'grok',
+    string
+  > = {
+    hermes: 'Hermes',
+    opencode: 'OpenCode',
+    gemini: 'Gemini CLI',
+    codex: 'Codex CLI',
+    grok: 'Grok Build',
+  };
+  const installHarness = async (
+    harness: 'hermes' | 'opencode' | 'gemini' | 'codex' | 'grok',
+  ) => {
+    setProviderNotice(`Starting ${harnessLabel[harness]} installation…`);
+    try {
+      await api('/local-harnesses/install', 'POST', { harness });
+      setHarnesses(await api<typeof harnesses>('/local-harnesses'));
+      if (harness === 'opencode') {
+        const saved = await api<typeof provider>('/provider-settings');
+        setProvider((current) => ({
+          ...current,
+          ...saved,
+          apiKey: '',
+          voiceKey: '',
+        }));
+      }
+      setProviderNotice(
+        'Installation started. This can take several minutes; this page will update while it runs.',
+      );
+    } catch (error) {
+      setProviderNotice(
+        error instanceof Error
+          ? error.message
+          : 'Could not start installation.',
+      );
+    }
+  };
+  const testHarness = async (
+    harness: 'hermes' | 'opencode' | 'gemini' | 'codex' | 'grok',
+  ) => {
+    setProviderNotice(`Testing ${harnessLabel[harness]}…`);
+    try {
+      const result = await api<{ detail?: string; error?: string }>(
+        '/local-harnesses/test',
+        'POST',
+        { harness },
+      );
+      setProviderNotice(result.detail || result.error || 'Test completed.');
+    } catch (error) {
+      setProviderNotice(
+        error instanceof Error ? error.message : 'Harness test failed.',
+      );
+    }
+  };
+  const signInHarness = async (harness: 'codex' | 'grok') => {
+    setProviderNotice(`Starting ${harnessLabel[harness]} sign-in…`);
+    try {
+      await api('/local-harnesses/login', 'POST', { harness });
+      setHarnesses(await api<typeof harnesses>('/local-harnesses'));
+      setProviderNotice(
+        'Device sign-in started. Follow the URL and code shown in this harness panel.',
+      );
+    } catch (error) {
+      setProviderNotice(
+        error instanceof Error ? error.message : 'Could not start sign-in.',
+      );
+    }
+  };
+  const startHarness = async (harness: 'hermes' | 'opencode') => {
+    try {
+      await api('/local-harnesses/start', 'POST', { harness });
+      setHarnesses(await api<typeof harnesses>('/local-harnesses'));
+      setProviderNotice(
+        `${harness === 'hermes' ? 'Hermes' : 'OpenCode'} start requested.`,
+      );
+    } catch (error) {
+      setProviderNotice(
+        error instanceof Error ? error.message : 'Could not start harness.',
+      );
+    }
+  };
+  const selectedConnection = provider.connections.find(
+    (connection) => connection.id === connectionEditorId,
+  );
+  const updateConnection = (
+    id: string,
+    patch: Partial<(typeof provider.connections)[number]>,
+  ) =>
+    setProvider((current) => ({
+      ...current,
+      connections: current.connections.map((connection) =>
+        connection.id === id ? { ...connection, ...patch } : connection,
+      ),
+    }));
+  const addConnection = () => {
+    const kind =
+      connectionTab === 'local'
+        ? 'hermes'
+        : connectionTab === 'custom'
+          ? 'custom'
+          : 'omniroute';
+    const id = crypto.randomUUID();
+    const connection = {
+      id,
+      name:
+        kind === 'omniroute'
+          ? 'OmniRoute'
+          : kind === 'hermes'
+            ? 'Hermes API'
+            : 'Custom endpoint',
+      kind,
+      baseUrl:
+        kind === 'omniroute'
+          ? provider.baseUrl || ''
+          : kind === 'hermes'
+            ? 'http://localhost:8642/v1'
+            : '',
+      model: '',
+      apiKey: '',
+      hasApiKey: false,
+    } as const;
+    setProvider((current) => ({
+      ...current,
+      connections: [...current.connections, { ...connection }],
+    }));
+    setConnectionEditorId(id);
+  };
+  const removeConnection = (id: string) => {
+    setProvider((current) => {
+      const connections = current.connections.filter(
+        (connection) => connection.id !== id,
+      );
+      const replacement = connections[0]?.id ?? '';
+      return {
+        ...current,
+        connections,
+        residentConnectionId:
+          current.residentConnectionId === id
+            ? replacement
+            : current.residentConnectionId,
+        housekeepingConnectionId:
+          current.housekeepingConnectionId === id
+            ? replacement
+            : current.housekeepingConnectionId,
+      };
+    });
+    setConnectionEditorId((current) =>
+      current === id
+        ? (provider.connections.find((item) => item.id !== id)?.id ?? '')
+        : current,
+    );
+  };
   const container = useRef<HTMLElement>(null);
   useEffect(() => {
     const previous =
@@ -197,8 +428,6 @@ export function WorkspaceDialog({
                 instructions: text,
                 researchAllowed: research,
                 memoryAllowed: memory,
-                learningContainerId: learningContainer.trim() || null,
-                skillDeliveryEnabled: skillDelivery,
               };
             }
             if (dialog.type === 'settings') {
@@ -239,6 +468,20 @@ export function WorkspaceDialog({
                   ...(provider.openCodePassword
                     ? { openCodePassword: provider.openCodePassword }
                     : {}),
+                  housekeepingKind: provider.housekeepingKind,
+                  housekeepingBaseUrl: provider.housekeepingBaseUrl,
+                  housekeepingModel: provider.housekeepingModel,
+                  ...(provider.housekeepingApiKey
+                    ? { housekeepingApiKey: provider.housekeepingApiKey }
+                    : {}),
+                  residentConnectionId: provider.residentConnectionId,
+                  housekeepingConnectionId: provider.housekeepingConnectionId,
+                  connections: provider.connections.map(
+                    ({ apiKey, ...connection }) => ({
+                      ...connection,
+                      ...(apiKey ? { apiKey } : {}),
+                    }),
+                  ),
                 },
               );
               if (settingsSaved) {
@@ -368,56 +611,6 @@ export function WorkspaceDialog({
               </label>
             </>
           )}
-          {dialog.type === 'dot' && (
-            <fieldset className="space-access-fields">
-              <legend>Automatic Learning</legend>
-              <label className="field-label" htmlFor="learning-container">
-                Learning container ID
-              </label>
-              <input
-                id="learning-container"
-                value={learningContainer}
-                maxLength={64}
-                pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                placeholder="research-workflow"
-                aria-describedby="learning-help"
-                onChange={(event) => {
-                  setLearningContainer(event.target.value);
-                  if (!event.target.value.trim()) setSkillDelivery(false);
-                }}
-              />
-              <p className="muted" id="learning-help">
-                Create this container in your Intelligence project first. New
-                conversations will contribute evidence to it. Leave blank to
-                keep new conversations out of Learning. Existing conversations
-                retain their original assignment.
-              </p>
-              <label className="permission-row">
-                <input
-                  type="checkbox"
-                  checked={skillDelivery}
-                  disabled={!learningContainer.trim()}
-                  onChange={(event) => setSkillDelivery(event.target.checked)}
-                />
-                <span>
-                  <strong>Use published skills</strong>
-                  <small>
-                    Load reviewed skills from each conversation’s assigned
-                    container. Enable delivery in Intelligence too. Turning this
-                    off stops skill loading; it does not stop evidence
-                    collection.
-                  </small>
-                </span>
-              </label>
-              <a
-                href="https://docs.copilotkit.ai/learning"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Set up Learning and review skills ↗
-              </a>
-            </fieldset>
-          )}
           {dialog.type === 'dot' && dialog.dot && (
             <ConnectionsSection dotId={dialog.dot.id} />
           )}
@@ -446,22 +639,34 @@ export function WorkspaceDialog({
           {dialog.type === 'settings' && (
             <>
               <nav className="settings-tabs" aria-label="Settings sections">
-                {(['connectivity', 'voice', 'general'] as const).map((tab) => (
+                {(
+                  [
+                    'models',
+                    'connections',
+                    'harnesses',
+                    'voice',
+                    'general',
+                  ] as const
+                ).map((tab) => (
                   <button
                     type="button"
                     key={tab}
                     className={mainTab === tab ? 'active' : ''}
                     onClick={() => setMainTab(tab)}
                   >
-                    {tab === 'connectivity'
-                      ? 'Connectivity'
-                      : tab === 'voice'
-                        ? 'Voice'
-                        : 'General'}
+                    {tab === 'models'
+                      ? 'Model roles'
+                      : tab === 'connections'
+                        ? 'Connections'
+                        : tab === 'harnesses'
+                          ? 'Harnesses'
+                          : tab === 'voice'
+                            ? 'Voice'
+                            : 'General'}
                   </button>
                 ))}
               </nav>
-              {mainTab === 'connectivity' && (
+              {mainTab === 'connections' && (
                 <>
                   <nav
                     className="settings-tabs settings-subtabs"
@@ -488,60 +693,385 @@ export function WorkspaceDialog({
                         {tab === 'omniroute'
                           ? 'OmniRoute'
                           : tab === 'local'
-                            ? 'Local harnesses'
+                            ? 'Hermes API'
                             : 'Custom host'}
                       </button>
                     ))}
                   </nav>
                   {connectionTab === 'local' && (
                     <p className="muted">
-                      Hermes API provides the local chat model. OpenCode is
-                      configured separately as a local agent harness.
+                      This connects OpenDots to Hermes�s model API. Install and
+                      manage the Hermes harness separately in Harnesses.
+                    </p>
+                  )}
+                  {connectionTab === 'custom' && (
+                    <p className="muted">
+                      Use any OpenAI-compatible endpoint, including llama.cpp,
+                      Ollama, or a server on another machine.
                     </p>
                   )}
                   <label className="field-label">
-                    {connectionTab === 'local'
-                      ? 'Hermes API URL'
-                      : 'Chat endpoint URL'}
-                    <input
-                      value={provider.baseUrl}
-                      placeholder={
-                        connectionTab === 'local'
-                          ? 'http://localhost:8642/v1'
-                          : 'http://localhost:20128/v1'
-                      }
-                      onChange={(e) =>
-                        setProvider({ ...provider, baseUrl: e.target.value })
-                      }
-                    />
+                    Saved connection
+                    <select
+                      value={connectionEditorId}
+                      onChange={(e) => {
+                        if (e.target.value === '__add__') addConnection();
+                        else setConnectionEditorId(e.target.value);
+                      }}
+                    >
+                      {provider.connections.map((connection) => (
+                        <option key={connection.id} value={connection.id}>
+                          {connection.name}
+                        </option>
+                      ))}
+                      <option value="__add__">Add a connection�</option>
+                    </select>
                   </label>
-                  <>
+                  {connectionTab === 'local' && (
+                    <p className="muted">
+                      This connects OpenDots to the Hermes model API. Install
+                      and manage the Hermes harness separately in Harnesses.
+                    </p>
+                  )}
+                  {connectionTab === 'custom' && (
+                    <p className="muted">
+                      Use any OpenAI-compatible endpoint, including llama.cpp,
+                      Ollama, or a server on another machine.
+                    </p>
+                  )}
+                  {selectedConnection ? (
+                    <>
+                      <label className="field-label">
+                        Connection name
+                        <input
+                          value={selectedConnection.name}
+                          onChange={(e) =>
+                            updateConnection(selectedConnection.id, {
+                              name: e.target.value,
+                            })
+                          }
+                          maxLength={80}
+                        />
+                      </label>
+                      <label className="field-label">
+                        Provider type
+                        <select
+                          value={selectedConnection.kind}
+                          onChange={(e) =>
+                            updateConnection(selectedConnection.id, {
+                              kind: e.target
+                                .value as typeof selectedConnection.kind,
+                              ...(e.target.value === 'openai'
+                                ? { baseUrl: 'https://api.openai.com/v1' }
+                                : e.target.value === 'grok'
+                                  ? { baseUrl: 'https://api.x.ai/v1' }
+                                  : e.target.value === 'gemini'
+                                    ? {
+                                        baseUrl:
+                                          'https://generativelanguage.googleapis.com/v1beta/openai/',
+                                      }
+                                    : {}),
+                            })
+                          }
+                        >
+                          <option value="omniroute">OmniRoute</option>
+                          <option value="openai">OpenAI</option>
+                          <option value="grok">Grok / xAI</option>
+                          <option value="gemini">Gemini API key</option>
+                          <option value="hermes">Hermes API</option>
+                          <option value="custom">
+                            OpenAI-compatible / custom
+                          </option>
+                        </select>
+                      </label>
+                      <label className="field-label">
+                        Endpoint URL
+                        <input
+                          value={selectedConnection.baseUrl}
+                          onChange={(e) =>
+                            updateConnection(selectedConnection.id, {
+                              baseUrl: e.target.value,
+                            })
+                          }
+                          placeholder="https://api.example.com/v1"
+                        />
+                      </label>
+                      <label className="field-label">
+                        Default model
+                        <input
+                          value={selectedConnection.model}
+                          onChange={(e) =>
+                            updateConnection(selectedConnection.id, {
+                              model: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="field-label">
+                        API key{' '}
+                        {selectedConnection.hasApiKey &&
+                        !selectedConnection.apiKey
+                          ? '(saved; leave blank to keep)'
+                          : ''}
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          value={selectedConnection.apiKey}
+                          onChange={(e) =>
+                            updateConnection(selectedConnection.id, {
+                              apiKey: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => removeConnection(selectedConnection.id)}
+                        disabled={provider.connections.length < 2}
+                      >
+                        Remove connection
+                      </button>
+                    </>
+                  ) : (
+                    <p className="muted">
+                      Add a named connection to use it for either model role.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={async () => {
+                      if (!selectedConnection?.baseUrl) {
+                        setProviderNotice(
+                          'Select a connection with an endpoint URL.',
+                        );
+                        return;
+                      }
+                      setProviderNotice(`Checking ${selectedConnection.name}�`);
+                      try {
+                        const response = await fetch(
+                          '/api/provider-settings/test',
+                          {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              ...authHeaders(),
+                            },
+                            body: JSON.stringify({
+                              target: 'connection',
+                              connectionId: selectedConnection.id,
+                            }),
+                          },
+                        );
+                        const result = await response.json();
+                        setProviderNotice(result.detail || result.error);
+                      } catch {
+                        setProviderNotice('Endpoint check failed.');
+                      }
+                    }}
+                  >
+                    Test selected connection
+                  </button>
+                  {providerNotice && (
+                    <p className="muted" role="status">
+                      {providerNotice}
+                    </p>
+                  )}
+                </>
+              )}
+              {mainTab === 'models' && (
+                <>
+                  <fieldset className="appearance-fields">
+                    <legend>Resident AI</legend>
+                    <p className="muted">
+                      Uses the connection selected in Connections. Choose the
+                      model this Dot should use for normal conversation.
+                    </p>
                     <label className="field-label">
-                      Chat model
+                      Model connection
+                      <select
+                        value={provider.residentConnectionId}
+                        onChange={(e) => {
+                          const connection = provider.connections.find(
+                            (item) => item.id === e.target.value,
+                          );
+                          setProvider({
+                            ...provider,
+                            residentConnectionId: e.target.value,
+                            model: connection?.model ?? '',
+                          });
+                        }}
+                      >
+                        {!provider.residentConnectionId && (
+                          <option value="">Choose a connection</option>
+                        )}
+                        {provider.connections.map((connection) => (
+                          <option key={connection.id} value={connection.id}>
+                            {connection.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field-label">
+                      Resident AI model
                       <input
+                        list="resident-model-options"
                         value={provider.model}
-                        placeholder="model name from your endpoint"
                         onChange={(e) =>
                           setProvider({ ...provider, model: e.target.value })
                         }
+                        placeholder="Type or choose an available model"
                       />
+                      <datalist id="resident-model-options">
+                        {modelChoices.map((model) => (
+                          <option key={model} value={model} />
+                        ))}
+                      </datalist>
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={async () => {
+                        setProviderNotice('Loading available resident models…');
+                        try {
+                          const response = await fetch(
+                            '/api/provider-settings/test',
+                            {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                ...authHeaders(),
+                              },
+                              body: JSON.stringify({
+                                target: 'connection',
+                                connectionId: provider.residentConnectionId,
+                              }),
+                            },
+                          );
+                          const result = await response.json();
+                          if (!response.ok) throw new Error(result.error);
+                          setModelChoices(result.models || []);
+                          setProviderNotice(
+                            result.models?.length
+                              ? `${result.models.length} models found.`
+                              : 'Endpoint responded but did not list models.',
+                          );
+                        } catch (error) {
+                          setProviderNotice(
+                            error instanceof Error
+                              ? error.message
+                              : 'Could not load models.',
+                          );
+                        }
+                      }}
+                    >
+                      Load resident models
+                    </button>
+                  </fieldset>
+                  <fieldset className="appearance-fields">
+                    <legend>Housekeeping AI</legend>
+                    <p className="muted">
+                      Scheduled and background tasks use this role. Select a
+                      saved connection and model independently of the resident
+                      role, or choose the resident connection to share it.
+                    </p>
+                    <label className="field-label">
+                      Model connection
+                      <select
+                        value={provider.housekeepingConnectionId}
+                        onChange={(e) => {
+                          const connection = provider.connections.find(
+                            (item) => item.id === e.target.value,
+                          );
+                          setProvider({
+                            ...provider,
+                            housekeepingConnectionId: e.target.value,
+                            housekeepingModel: connection?.model ?? '',
+                          });
+                        }}
+                      >
+                        {!provider.housekeepingConnectionId && (
+                          <option value="">Choose a connection</option>
+                        )}
+                        {provider.connections.map((connection) => (
+                          <option key={connection.id} value={connection.id}>
+                            {connection.id === provider.residentConnectionId
+                              ? `${connection.name} (same as resident)`
+                              : connection.name}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                     <label className="field-label">
-                      API key{' '}
-                      {provider.hasApiKey && !provider.apiKey
-                        ? '(saved; leave blank to keep)'
-                        : ''}
+                      Housekeeping model
                       <input
-                        type="password"
-                        autoComplete="new-password"
-                        value={provider.apiKey}
+                        list="housekeeping-model-options"
+                        value={provider.housekeepingModel}
                         onChange={(e) =>
-                          setProvider({ ...provider, apiKey: e.target.value })
+                          setProvider({
+                            ...provider,
+                            housekeepingModel: e.target.value,
+                          })
                         }
+                        placeholder="Blank uses the connection default model"
                       />
+                      <datalist id="housekeeping-model-options">
+                        {housekeepingModelChoices.map((model) => (
+                          <option key={model} value={model} />
+                        ))}
+                      </datalist>
                     </label>
-                  </>
-                  {connectionTab === 'local' && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={async () => {
+                        setProviderNotice('Loading housekeeping models…');
+                        try {
+                          const response = await fetch(
+                            '/api/provider-settings/test',
+                            {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                ...authHeaders(),
+                              },
+                              body: JSON.stringify({
+                                target: 'connection',
+                                connectionId: provider.housekeepingConnectionId,
+                              }),
+                            },
+                          );
+                          const result = await response.json();
+                          if (!response.ok) throw new Error(result.error);
+                          setHousekeepingModelChoices(result.models || []);
+                          setProviderNotice(
+                            result.models?.length
+                              ? `${result.models.length} housekeeping models found.`
+                              : 'Endpoint did not list models.',
+                          );
+                        } catch (error) {
+                          setProviderNotice(
+                            error instanceof Error
+                              ? error.message
+                              : 'Could not load models.',
+                          );
+                        }
+                      }}
+                    >
+                      Load housekeeping models
+                    </button>
+                  </fieldset>
+                </>
+              )}
+              {mainTab === 'harnesses' && (
+                <>
+                  <p className="muted">
+                    Install and check machine-level agent harnesses here. Their
+                    model access is configured separately under Connections and
+                    Model roles.
+                  </p>
+                  <>
                     <>
                       <label className="field-label">
                         OpenCode server URL
@@ -580,38 +1110,8 @@ export function WorkspaceDialog({
                         through the OpenCode agent.
                       </p>
                     </>
-                  )}
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={async () => {
-                      setProviderNotice('Checking endpoint…');
-                      try {
-                        const response = await fetch(
-                          '/api/provider-settings/test',
-                          {
-                            method: 'POST',
-                            headers: {
-                              'Content-Type': 'application/json',
-                              ...authHeaders(),
-                            },
-                            body: JSON.stringify({
-                              target: 'chat',
-                              baseUrl: provider.baseUrl,
-                              apiKey: provider.apiKey,
-                            }),
-                          },
-                        );
-                        const result = await response.json();
-                        setProviderNotice(result.detail || result.error);
-                      } catch {
-                        setProviderNotice('Endpoint check failed.');
-                      }
-                    }}
-                  >
-                    Test chat endpoint
-                  </button>
-                  {connectionTab === 'local' && (
+                  </>
+                  <>
                     <button
                       type="button"
                       className="secondary"
@@ -642,12 +1142,161 @@ export function WorkspaceDialog({
                     >
                       Check OpenCode server
                     </button>
-                  )}
-                  {providerNotice && (
-                    <p className="muted" role="status">
-                      {providerNotice}
+                  </>
+                  <fieldset className="appearance-fields">
+                    <legend>Hermes agent API</legend>
+                    <p className="muted">
+                      {harnesses?.hermes.job?.message ||
+                        (harnesses?.hermes.running
+                          ? 'Running'
+                          : harnesses?.hermes.installed
+                            ? 'Installed; start it by saving settings or clicking Test.'
+                            : 'Not installed')}
                     </p>
-                  )}
+                    {!harnesses?.hermes.installed ? (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={harnesses?.hermes.job?.state === 'installing'}
+                        onClick={() => void installHarness('hermes')}
+                      >
+                        Install and set up Hermes
+                      </button>
+                    ) : (
+                      <>
+                        {!harnesses.hermes.running && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => void startHarness('hermes')}
+                          >
+                            Start Hermes
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => void testHarness('hermes')}
+                        >
+                          Test Hermes model
+                        </button>
+                      </>
+                    )}
+                  </fieldset>
+                  <fieldset className="appearance-fields">
+                    <legend>OpenCode task harness</legend>
+                    <p className="muted">
+                      {harnesses?.opencode.job?.message ||
+                        (harnesses?.opencode.running
+                          ? `Running at ${harnesses.opencode.url}`
+                          : harnesses?.opencode.installed
+                            ? 'Installed; not running'
+                            : 'Not installed')}
+                    </p>
+                    {!harnesses?.opencode.installed ? (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={
+                          harnesses?.opencode.job?.state === 'installing'
+                        }
+                        onClick={() => void installHarness('opencode')}
+                      >
+                        Install and set up OpenCode
+                      </button>
+                    ) : (
+                      <>
+                        {!harnesses.opencode.running && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => void startHarness('opencode')}
+                          >
+                            Start OpenCode
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => void testHarness('opencode')}
+                        >
+                          Test OpenCode task harness
+                        </button>
+                      </>
+                    )}
+                  </fieldset>
+                  {(
+                    [
+                      [
+                        'gemini',
+                        'Google Gemini CLI',
+                        'Install the standalone Google coding harness on this Ubuntu machine.',
+                      ],
+                      [
+                        'codex',
+                        'OpenAI Codex CLI',
+                        'Install the Codex command-line harness. Its ChatGPT or API sign-in is managed separately from OpenDots model connections.',
+                      ],
+                      [
+                        'grok',
+                        'Grok Build CLI',
+                        'Install the official xAI coding harness on this Ubuntu machine.',
+                      ],
+                    ] as const
+                  ).map(([name, label, description]) => {
+                    const harness = harnesses?.[name];
+                    return (
+                      <fieldset className="appearance-fields" key={name}>
+                        <legend>{label}</legend>
+                        <p className="muted">{description}</p>
+                        <p className="muted">
+                          {harness?.job?.message ||
+                            (harness?.installed
+                              ? 'Installed. Run its sign-in flow on the host before using it.'
+                              : 'Not installed')}
+                        </p>
+                        {!harness?.installed ? (
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={harness?.job?.state === 'installing'}
+                            onClick={() => void installHarness(name)}
+                          >
+                            Install {label}
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => void testHarness(name)}
+                            >
+                              Check {label} install
+                            </button>
+                            {(name === 'codex' || name === 'grok') && (
+                              <button
+                                type="button"
+                                className="secondary"
+                                disabled={
+                                  harness?.job?.state === 'authenticating'
+                                }
+                                onClick={() => void signInHarness(name)}
+                              >
+                                Sign in to {label}
+                              </button>
+                            )}
+                          </>
+                        )}
+                        {name === 'gemini' && (
+                          <p className="muted">
+                            OpenDots does not reuse Google-account CLI OAuth for
+                            model calls. To use Gemini as a role connection, add
+                            a Gemini API key in Connections.
+                          </p>
+                        )}
+                      </fieldset>
+                    );
+                  })}
                 </>
               )}
               {mainTab === 'voice' && (
@@ -675,6 +1324,36 @@ export function WorkspaceDialog({
                       </option>
                     </select>
                   </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={async () => {
+                      localStorage.setItem(
+                        'opendots-whisper-model',
+                        whisperModel,
+                      );
+                      setProviderNotice('Loading the local Whisper model…');
+                      try {
+                        const { prepareLocalTranscriptionModel } =
+                          await import('./local-transcription');
+                        const model =
+                          await prepareLocalTranscriptionModel(
+                            setProviderNotice,
+                          );
+                        setProviderNotice(
+                          `Whisper model ${model} is ready on this device.`,
+                        );
+                      } catch (error) {
+                        setProviderNotice(
+                          error instanceof Error
+                            ? error.message
+                            : 'Whisper could not load this model.',
+                        );
+                      }
+                    }}
+                  >
+                    Test local Whisper model
+                  </button>
                   <strong>Live voice calls</strong>
                   <p className="muted">
                     Live speech-to-speech uses its own realtime endpoint and
@@ -695,14 +1374,64 @@ export function WorkspaceDialog({
                   </label>
                   <label className="field-label">
                     Realtime voice model
-                    <input
+                    <select
                       value={provider.voiceModel}
-                      placeholder="gpt-realtime"
                       onChange={(e) =>
                         setProvider({ ...provider, voiceModel: e.target.value })
                       }
-                    />
+                    >
+                      {!voiceModelChoices.length && provider.voiceModel && (
+                        <option value={provider.voiceModel}>
+                          {provider.voiceModel} (saved)
+                        </option>
+                      )}
+                      {voiceModelChoices.map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </select>
                   </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={async () => {
+                      setProviderNotice('Loading voice models…');
+                      try {
+                        const response = await fetch(
+                          '/api/provider-settings/test',
+                          {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              ...authHeaders(),
+                            },
+                            body: JSON.stringify({
+                              target: 'voice',
+                              voiceBaseUrl: provider.voiceBaseUrl,
+                              voiceKey: provider.voiceKey,
+                            }),
+                          },
+                        );
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.error);
+                        setVoiceModelChoices(result.models || []);
+                        setProviderNotice(
+                          result.models?.length
+                            ? `${result.models.length} voice endpoint models found.`
+                            : 'Voice endpoint did not list models.',
+                        );
+                      } catch (error) {
+                        setProviderNotice(
+                          error instanceof Error
+                            ? error.message
+                            : 'Could not load voice models.',
+                        );
+                      }
+                    }}
+                  >
+                    Load voice models
+                  </button>
                   <label className="field-label">
                     Voice API key{' '}
                     {provider.hasVoiceKey && !provider.voiceKey
@@ -719,12 +1448,29 @@ export function WorkspaceDialog({
                   </label>
                   <label className="field-label">
                     Spoken voice
-                    <input
+                    <select
                       value={provider.voiceName}
                       onChange={(e) =>
                         setProvider({ ...provider, voiceName: e.target.value })
                       }
-                    />
+                    >
+                      {[
+                        'alloy',
+                        'ash',
+                        'ballad',
+                        'cedar',
+                        'coral',
+                        'echo',
+                        'marin',
+                        'sage',
+                        'shimmer',
+                        'verse',
+                      ].map((voice) => (
+                        <option key={voice} value={voice}>
+                          {voice[0].toUpperCase() + voice.slice(1)}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </>
               )}
