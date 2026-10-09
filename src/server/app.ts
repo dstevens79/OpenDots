@@ -705,7 +705,7 @@ export function createApp({
       const isModelTest = request.data.target === 'model';
       const response = await fetch(
         request.data.target === 'opencode'
-          ? `${base}/global/health`
+          ? `${base}/api/info`
           : isModelTest
             ? `${base}/chat/completions`
             : `${base}/models`,

@@ -355,10 +355,10 @@ export class DotAgent extends AbstractAgent {
                       }));
                   },
                 }),
-                ...(['hermes', 'codex', 'grok'] as const).map((harness) =>
+                ...(['hermes', 'opencode', 'codex', 'grok'] as const).map((harness) =>
                   defineTool({
                     name: `delegate_to_${harness}`,
-                    description: `Send an owner-requested task or explicit harness test to the installed ${harness === 'hermes' ? 'Hermes Agent' : harness === 'codex' ? 'OpenAI Codex CLI' : 'xAI Grok Build CLI'}. It runs in this Dot's isolated, persistent harness workspace on the ACTUALLY Open Dots machine. Report the harness result and workspace path.`,
+                    description: `Send an owner-requested task or explicit harness test to the installed ${harness === 'hermes' ? 'Hermes Agent' : harness === 'opencode' ? 'OpenCode' : harness === 'codex' ? 'OpenAI Codex CLI' : 'xAI Grok Build CLI'}. It runs in this Dot's persistent machine workspace. Report the harness result and workspace path.`,
                     parameters: z.object({
                       task: z.string().trim().min(1).max(12000),
                     }),
@@ -434,8 +434,8 @@ export class DotAgent extends AbstractAgent {
                 ),
               ]
             : []),
-          ...(configuredProvider.openCodeUrl ||
-          (this.config.harnessManagerUrl && this.config.harnessManagerToken)
+          ...(configuredProvider.openCodeUrl &&
+          !(this.config.harnessManagerUrl && this.config.harnessManagerToken)
             ? [
                 defineTool({
                   name: 'delegate_to_opencode',
@@ -486,7 +486,7 @@ export class DotAgent extends AbstractAgent {
                     };
                     if (openCodePassword)
                       headers.Authorization = `Basic ${Buffer.from(`opencode:${openCodePassword}`).toString('base64')}`;
-                    const sessionResponse = await fetch(`${base}/session`, {
+                    const sessionResponse = await fetch(`${base}/api/session`, {
                       method: 'POST',
                       headers,
                       body: JSON.stringify({ title: task.slice(0, 120) }),
@@ -497,20 +497,19 @@ export class DotAgent extends AbstractAgent {
                         `OpenCode could not start a session (HTTP ${sessionResponse.status}).`,
                       );
                     const session = (await sessionResponse.json()) as {
-                      id?: unknown;
+                      data?: { id?: unknown };
                     };
-                    if (typeof session.id !== 'string')
+                    if (typeof session.data?.id !== 'string')
                       throw new Error(
                         'OpenCode returned no session identifier.',
                       );
+                    const sessionId = session.data.id;
                     const response = await fetch(
-                      `${base}/session/${encodeURIComponent(session.id)}/message`,
+                      `${base}/api/session/${encodeURIComponent(sessionId)}/prompt`,
                       {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({
-                          parts: [{ type: 'text', text: task }],
-                        }),
+                        body: JSON.stringify({ text: task }),
                         signal: controller.signal,
                       },
                     );
@@ -518,21 +517,35 @@ export class DotAgent extends AbstractAgent {
                       throw new Error(
                         `OpenCode task failed (HTTP ${response.status}).`,
                       );
-                    const result = (await response.json()) as {
-                      parts?: { type?: unknown; text?: unknown }[];
-                      info?: { id?: unknown };
-                    };
-                    const text = result.parts
-                      ?.filter(
-                        (part) =>
-                          part.type === 'text' && typeof part.text === 'string',
-                      )
-                      .map((part) => part.text)
-                      .join('\n');
-                    check();
-                    return (
-                      text ||
-                      'OpenCode completed the request without returning a text summary.'
+                    const deadline = Date.now() + 85_000;
+                    while (Date.now() < deadline) {
+                      check();
+                      await new Promise((resolve) => setTimeout(resolve, 900));
+                      const result = (await fetch(
+                        `${base}/api/session/${encodeURIComponent(sessionId)}/message`,
+                        { headers, signal: controller.signal },
+                      ).then((item) => item.json())) as {
+                        data?: {
+                          type?: unknown;
+                          content?: { type?: unknown; text?: unknown }[];
+                        }[];
+                      };
+                      const text = result.data
+                        ?.filter((message) => message.type === 'assistant')
+                        .flatMap((message) => message.content ?? [])
+                        .filter(
+                          (part) =>
+                            part.type === 'text' && typeof part.text === 'string',
+                        )
+                        .map((part) => part.text as string)
+                        .join('\n');
+                      if (text) {
+                        check();
+                        return text;
+                      }
+                    }
+                    throw new Error(
+                      'OpenCode did not return a response within 85 seconds.',
                     );
                   },
                 }),
@@ -545,6 +558,7 @@ export class DotAgent extends AbstractAgent {
         ];
         const harnessContext = [
           configuredProvider.openCodeUrl
+            && !(this.config.harnessManagerUrl && this.config.harnessManagerToken)
             ? 'A server-managed OpenCode harness is configured for delegated coding and workspace tasks; use it through its provided tools when appropriate, and report only results returned by the harness.'
             : '',
           !configuredProvider.openCodeUrl &&
@@ -553,7 +567,7 @@ export class DotAgent extends AbstractAgent {
             ? 'A machine-installed OpenCode harness is available through delegate_to_opencode; it uses the selected model endpoint and its managed machine server.'
             : '',
           this.config.harnessManagerUrl && this.config.harnessManagerToken
-            ? 'Use list_local_harnesses to check installed and running machine tools. Hermes, Codex, and Grok Build have delegation tools; Hermes needs a working model/provider connection, and Codex and Grok Build need sign-in. Each delegated task uses a separate persistent workspace per Dot. OpenCode has a delegation tool when its server connection is configured. Hermes can also be selected as a saved model connection. Gemini is used through saved provider connections; never reuse Google-account Gemini CLI OAuth through ACTUALLY Open Dots.'
+            ? 'Use list_local_harnesses to check installed and running machine tools. Hermes, OpenCode, Codex, and Grok Build have delegation tools. Hermes and OpenCode use the selected model endpoint; Codex and Grok Build need sign-in. Delegated tasks use persistent Dot-specific workspaces. Hermes can also be selected as a saved model connection. Gemini is used through saved provider connections; never reuse Google-account Gemini CLI OAuth through ACTUALLY Open Dots.'
             : '',
         ]
           .filter(Boolean)
