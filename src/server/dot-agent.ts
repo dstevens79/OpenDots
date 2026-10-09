@@ -303,81 +303,132 @@ export class DotAgent extends AbstractAgent {
         const serverTools = [
           ...tools,
           ...(this.config.harnessManagerUrl && this.config.harnessManagerToken
-            ? (['codex', 'grok'] as const).map((harness) =>
+            ? [
                 defineTool({
-                  name: `delegate_to_${harness}`,
-                  description: `Delegate an owner-requested coding or file task to the installed ${harness === 'codex' ? 'OpenAI Codex' : 'xAI Grok Build'} CLI. It runs in this Dot's isolated, persistent harness workspace on the ACTUALLY Open Dots machine. Use only when a task benefits from coding-agent tools; report the harness result and workspace path.`,
-                  parameters: z.object({
-                    task: z.string().trim().min(1).max(12000),
-                  }),
-                  execute: async ({ task }) => {
+                  name: 'list_local_harnesses',
+                  description:
+                    'Check which machine-level harnesses are installed and running before choosing one. This reports status for Hermes, OpenCode, Gemini CLI, Codex CLI, and Grok CLI.',
+                  parameters: z.object({}),
+                  execute: async () => {
                     check();
                     const base = this.config.harnessManagerUrl!.replace(
                       /\/$/,
                       '',
                     );
-                    const headers = {
-                      Authorization: `Bearer ${this.config.harnessManagerToken}`,
-                      'Content-Type': 'application/json',
-                    };
-                    const started = await fetch(`${base}/run`, {
-                      method: 'POST',
-                      headers,
-                      body: JSON.stringify({
-                        harness,
-                        dotId: this.dotId,
-                        task,
-                      }),
-                      signal: AbortSignal.timeout(12_000),
+                    const response = await fetch(`${base}/status`, {
+                      headers: {
+                        Authorization: `Bearer ${this.config.harnessManagerToken}`,
+                      },
+                      signal: controller.signal,
                     });
-                    const startResult = (await started
-                      .json()
-                      .catch(() => ({}))) as {
-                      runId?: string;
-                      error?: string;
-                    };
-                    if (!started.ok || !startResult.runId)
+                    if (!response.ok)
                       throw new Error(
-                        startResult.error ||
-                          `${harness} could not start a task (HTTP ${started.status}).`,
+                        `The local harness manager returned HTTP ${response.status}.`,
                       );
-                    const deadline = Date.now() + 72_000;
-                    while (Date.now() < deadline) {
-                      check();
-                      await new Promise((resolve) => setTimeout(resolve, 900));
-                      const response = await fetch(
-                        `${base}/run/${encodeURIComponent(startResult.runId)}`,
-                        {
-                          headers,
-                          signal: controller.signal,
-                        },
-                      );
-                      const result = (await response
-                        .json()
-                        .catch(() => ({}))) as {
-                        state?: string;
-                        output?: string;
-                        workspace?: string;
-                      };
-                      if (!response.ok)
-                        throw new Error(`${harness} status check failed.`);
-                      if (result.state === 'complete') {
-                        check();
-                        return `Workspace: ${result.workspace || 'Dot harness workspace'}\n${result.output || 'The harness completed without returning a summary.'}`;
+                    const status = (await response.json()) as Record<
+                      string,
+                      {
+                        installed?: boolean;
+                        running?: boolean;
+                        job?: { state?: string } | null;
                       }
-                      if (result.state === 'failed')
-                        throw new Error(
-                          `${harness} task failed: ${result.output || 'No diagnostic returned.'}`,
-                        );
-                      if (result.state === 'missing')
-                        throw new Error(`${harness} task status expired.`);
-                    }
-                    throw new Error(
-                      `${harness} is still working after 72 seconds; the task can be checked again later.`,
-                    );
+                    >;
+                    return Object.entries(status)
+                      .filter(([name]) =>
+                        [
+                          'hermes',
+                          'opencode',
+                          'gemini',
+                          'codex',
+                          'grok',
+                        ].includes(name),
+                      )
+                      .map(([name, item]) => ({
+                        harness: name,
+                        installed: item.installed === true,
+                        running: item.running === true,
+                        installState: item.job?.state ?? null,
+                      }));
                   },
                 }),
-              )
+                ...(['codex', 'grok'] as const).map((harness) =>
+                  defineTool({
+                    name: `delegate_to_${harness}`,
+                    description: `Delegate an owner-requested coding or file task to the installed ${harness === 'codex' ? 'OpenAI Codex' : 'xAI Grok Build'} CLI. It runs in this Dot's isolated, persistent harness workspace on the ACTUALLY Open Dots machine. Use only when a task benefits from coding-agent tools; report the harness result and workspace path.`,
+                    parameters: z.object({
+                      task: z.string().trim().min(1).max(12000),
+                    }),
+                    execute: async ({ task }) => {
+                      check();
+                      const base = this.config.harnessManagerUrl!.replace(
+                        /\/$/,
+                        '',
+                      );
+                      const headers = {
+                        Authorization: `Bearer ${this.config.harnessManagerToken}`,
+                        'Content-Type': 'application/json',
+                      };
+                      const started = await fetch(`${base}/run`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                          harness,
+                          dotId: this.dotId,
+                          task,
+                        }),
+                        signal: AbortSignal.timeout(12_000),
+                      });
+                      const startResult = (await started
+                        .json()
+                        .catch(() => ({}))) as {
+                        runId?: string;
+                        error?: string;
+                      };
+                      if (!started.ok || !startResult.runId)
+                        throw new Error(
+                          startResult.error ||
+                            `${harness} could not start a task (HTTP ${started.status}).`,
+                        );
+                      const deadline = Date.now() + 72_000;
+                      while (Date.now() < deadline) {
+                        check();
+                        await new Promise((resolve) =>
+                          setTimeout(resolve, 900),
+                        );
+                        const response = await fetch(
+                          `${base}/run/${encodeURIComponent(startResult.runId)}`,
+                          {
+                            headers,
+                            signal: controller.signal,
+                          },
+                        );
+                        const result = (await response
+                          .json()
+                          .catch(() => ({}))) as {
+                          state?: string;
+                          output?: string;
+                          workspace?: string;
+                        };
+                        if (!response.ok)
+                          throw new Error(`${harness} status check failed.`);
+                        if (result.state === 'complete') {
+                          check();
+                          return `Workspace: ${result.workspace || 'Dot harness workspace'}\n${result.output || 'The harness completed without returning a summary.'}`;
+                        }
+                        if (result.state === 'failed')
+                          throw new Error(
+                            `${harness} task failed: ${result.output || 'No diagnostic returned.'}`,
+                          );
+                        if (result.state === 'missing')
+                          throw new Error(`${harness} task status expired.`);
+                      }
+                      throw new Error(
+                        `${harness} is still working after 72 seconds; the task can be checked again later.`,
+                      );
+                    },
+                  }),
+                ),
+              ]
             : []),
           ...(configuredProvider.openCodeUrl
             ? [
@@ -461,7 +512,7 @@ export class DotAgent extends AbstractAgent {
             ? 'A server-managed OpenCode harness is configured for delegated coding and workspace tasks; use it through its provided tools when appropriate, and report only results returned by the harness.'
             : '',
           this.config.harnessManagerUrl && this.config.harnessManagerToken
-            ? 'The machine may also have Codex CLI and Grok Build CLI delegation tools. They require installation and sign-in in Harnesses settings, and run in a separate persistent workspace per Dot. Gemini CLI is installed as a standalone harness only; never reuse Google-account Gemini CLI OAuth through ACTUALLY Open Dots. For Gemini model calls, use a saved Gemini Developer API connection.'
+            ? 'Use list_local_harnesses to check installed and running machine tools. Codex and Grok Build have delegation tools and require sign-in; each task uses a separate persistent workspace per Dot. OpenCode has a delegation tool when its server connection is configured. Hermes and Gemini are used through saved provider connections; never reuse Google-account Gemini CLI OAuth through ACTUALLY Open Dots.'
             : '',
         ]
           .filter(Boolean)
