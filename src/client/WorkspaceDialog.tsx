@@ -136,6 +136,11 @@ export function WorkspaceDialog({
       'Xenova/whisper-tiny.en',
   );
   const [providerNotice, setProviderNotice] = useState('');
+  const [whisperRecording, setWhisperRecording] = useState(false);
+  const [whisperProcessing, setWhisperProcessing] = useState(false);
+  const [whisperTranscript, setWhisperTranscript] = useState('');
+  const whisperRecorder = useRef<MediaRecorder | undefined>(undefined);
+  const whisperStream = useRef<MediaStream | undefined>(undefined);
   useEffect(() => {
     if (dialog.type !== 'settings') return;
     void api<typeof provider>('/provider-settings')
@@ -344,6 +349,86 @@ export function WorkspaceDialog({
     );
   };
   const container = useRef<HTMLElement>(null);
+  useEffect(
+    () => () => {
+      whisperRecorder.current?.stop();
+      whisperStream.current?.getTracks().forEach((track) => track.stop());
+    },
+    [],
+  );
+  const toggleWhisperTest = async () => {
+    if (whisperRecording) {
+      whisperRecorder.current?.stop();
+      whisperStream.current?.getTracks().forEach((track) => track.stop());
+      whisperRecorder.current = undefined;
+      whisperStream.current = undefined;
+      setWhisperRecording(false);
+      return;
+    }
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      setProviderNotice('This browser does not support microphone recording.');
+      return;
+    }
+    try {
+      setWhisperTranscript('');
+      setProviderNotice('Requesting microphone access…');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream);
+      whisperStream.current = stream;
+      whisperRecorder.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      recorder.onerror = () =>
+        setProviderNotice('Microphone recording failed.');
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        setWhisperProcessing(true);
+        setProviderNotice('Transcribing locally on this device…');
+        void import('./local-transcription')
+          .then(({ transcribeAudio }) =>
+            transcribeAudio(
+              new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }),
+              setProviderNotice,
+            ),
+          )
+          .then((text) => {
+            setWhisperTranscript(text);
+            setProviderNotice(
+              text
+                ? 'Whisper test complete.'
+                : 'No speech was recognized. Try speaking closer to the microphone.',
+            );
+          })
+          .catch((reason: unknown) =>
+            setProviderNotice(
+              reason instanceof Error
+                ? reason.message
+                : 'Local transcription failed.',
+            ),
+          )
+          .finally(() => {
+            setWhisperProcessing(false);
+            setWhisperRecording(false);
+          });
+      };
+      recorder.start();
+      setWhisperRecording(true);
+      setProviderNotice(
+        'Recording. Say a short sentence, then select Stop and transcribe.',
+      );
+    } catch (reason) {
+      setProviderNotice(
+        reason instanceof Error
+          ? reason.message
+          : 'Microphone access was denied.',
+      );
+    }
+  };
   useEffect(() => {
     const previous =
       document.activeElement instanceof HTMLElement
@@ -843,6 +928,7 @@ export function WorkspaceDialog({
                   <button
                     type="button"
                     className="secondary"
+                    disabled={whisperProcessing}
                     onClick={async () => {
                       if (!selectedConnection?.baseUrl) {
                         setProviderNotice(
@@ -1325,33 +1411,29 @@ export function WorkspaceDialog({
                   <button
                     type="button"
                     className="secondary"
-                    onClick={async () => {
+                    onClick={() => {
                       localStorage.setItem(
                         'opendots-whisper-model',
                         whisperModel,
                       );
-                      setProviderNotice('Loading the local Whisper model…');
-                      try {
-                        const { prepareLocalTranscriptionModel } =
-                          await import('./local-transcription');
-                        const model =
-                          await prepareLocalTranscriptionModel(
-                            setProviderNotice,
-                          );
-                        setProviderNotice(
-                          `Whisper model ${model} is ready on this device.`,
-                        );
-                      } catch (error) {
-                        setProviderNotice(
-                          error instanceof Error
-                            ? error.message
-                            : 'Whisper could not load this model.',
-                        );
-                      }
+                      void toggleWhisperTest();
                     }}
                   >
-                    Test local Whisper model
+                    {whisperRecording
+                      ? 'Stop and transcribe'
+                      : 'Record a Whisper test'}
                   </button>
+                  {whisperTranscript && (
+                    <div className="muted" role="status">
+                      <strong>Recognized text:</strong> {whisperTranscript}
+                    </div>
+                  )}
+                  <p className="muted">
+                    In any chat, use the microphone button beside the message
+                    box. It records a short clip and inserts Whisper’s
+                    transcript into your draft; nothing is sent until you press
+                    Send.
+                  </p>
                   <strong>Live voice calls</strong>
                   <p className="muted">
                     Live speech-to-speech uses its own realtime endpoint and

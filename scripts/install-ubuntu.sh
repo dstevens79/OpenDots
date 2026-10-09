@@ -261,6 +261,13 @@ fi
 systemctl daemon-reload
 systemctl enable opendots.service
 systemctl restart opendots.service
+echo
+echo "Set up model access now? You can connect OmniRoute, OpenRouter, or any OpenAI-compatible endpoint."
+if [[ -t 0 ]]; then
+  runuser -u opendots -- "$node_bin" --import tsx "$APP_DIR/scripts/configure-initial-models.ts" "$DATA_DIR/opendots.sqlite"
+else
+  echo "Skipping interactive model setup because this installer has no terminal. Run Settings → Connections after signing in."
+fi
 if [[ "$configure_ufw" =~ ^[Yy]$ ]]; then
   ufw allow 4310/tcp comment 'ACTUALLY Open Dots LAN access'
   if ufw status | grep -q '^Status: active'; then
@@ -278,5 +285,5 @@ if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
 else
   echo "ACTUALLY Open Dots is installed and running locally. Open http://localhost:4310."
 fi
-echo "Then add a model connection in Settings."
+echo "Manage model connections and the Resident and Housekeeping roles in Settings → Models / Connections."
 echo "Optional harnesses are installed from Settings → Harnesses; choose only the ones you want."
