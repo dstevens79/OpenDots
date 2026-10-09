@@ -177,7 +177,8 @@ fi
 app_port="4310"
 if [[ "$enable_https" =~ ^[Yy]$ ]]; then
   bind_host="127.0.0.1"
-  app_port="4311"
+  # 4311 belongs to the optional page-reader service.
+  app_port="4314"
 fi
 python3 - "$ENV_FILE" "$bind_host" "$DATA_DIR/opendots.sqlite" "$owner_password_hash" "$app_port" <<'PY'
 import pathlib, secrets, sys
@@ -355,7 +356,7 @@ server {
     client_max_body_size 1m;
 
     location / {
-        proxy_pass http://127.0.0.1:4311;
+        proxy_pass http://127.0.0.1:4314;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
