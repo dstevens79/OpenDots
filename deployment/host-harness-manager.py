@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import platform
 import secrets
 import shlex
 import signal
@@ -132,6 +133,9 @@ def start(name):
 def install(name):
     if name == "hermes":
         target = path(name)
+        if target.exists() and not (target / ".git").exists():
+            backup = target.with_name(f"{target.name}.incomplete-{int(time.time())}")
+            target.rename(backup)
         target.mkdir(parents=True, exist_ok=True)
         installer = ROOT / "hermes-install.sh"
         urllib.request.urlretrieve("https://hermes-agent.nousresearch.com/install.sh", installer)
@@ -144,6 +148,17 @@ def install(name):
             raise RuntimeError("Node.js and npm are required on the Ubuntu host; install Node.js 24 first.")
         target = path(name)
         target.mkdir(parents=True, exist_ok=True)
+        architecture = {
+            "x86_64": "x64",
+            "amd64": "x64",
+            "aarch64": "arm64",
+            "arm64": "arm64",
+        }.get(platform.machine().lower())
+        if not architecture:
+            raise RuntimeError("OpenCode does not publish a CLI binary for this Linux architecture.")
+        # npm currently omits this optional native package on some Linux installs;
+        # install it explicitly so OpenCode's postinstall can link the CLI binary.
+        subprocess.run(["npm", "install", "--prefix", str(target), f"@opencode/cli-linux-{architecture}"], check=True, timeout=900)
         subprocess.run(["npm", "install", "--prefix", str(target), "@opencode/cli"], check=True, timeout=900)
     elif name in ("gemini", "codex"):
         if not shutil.which("npm"):
