@@ -201,7 +201,11 @@ export function createApp({
       );
     const session = randomBytes(32).toString('hex');
     sessions.set(session, Date.now() + sessionLifetimeSeconds * 1000);
-    const secure = new URL(c.req.url).protocol === 'https:' ? '; Secure' : '';
+    const forwardedProto = c.req.header('x-forwarded-proto');
+    const secure =
+      new URL(c.req.url).protocol === 'https:' || forwardedProto === 'https'
+        ? '; Secure'
+        : '';
     c.header(
       'Set-Cookie',
       `${sessionCookie}=${session}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${sessionLifetimeSeconds}${secure}`,

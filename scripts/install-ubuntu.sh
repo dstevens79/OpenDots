@@ -29,6 +29,7 @@ want_grok="n"
 install_computer="n"
 install_browser="n"
 configure_ufw="n"
+enable_https="n"
 
 toggle_option() {
   local name="$1"
@@ -80,6 +81,10 @@ while true; do
   [[ "$install_computer" == "y" ]] && computer_summary="On" || computer_summary="Off"
   [[ "$install_browser" == "y" ]] && browser_summary="On" || browser_summary="Off"
   [[ "$configure_ufw" == "y" ]] && ufw_summary="Allow TCP 4310" || ufw_summary="No change"
+  if [[ "$enable_https" == "y" && "$configure_ufw" == "y" ]]; then
+    ufw_summary="Allow TCP 4310, 443"
+  fi
+  [[ "$enable_https" == "y" ]] && https_summary="On (private local CA; trust it on each device)" || https_summary="Off"
   echo
   echo "ACTUALLY Open Dots setup options"
   echo '  1) Network access:          '"$lan_summary"
@@ -87,8 +92,9 @@ while true; do
   echo '  3) Local Chrome workspace:  '"$computer_summary"
   echo '  4) Local page reader:       '"$browser_summary"
   echo '  5) UFW firewall:            '"$ufw_summary"
-  echo '  6) Continue with install'
-  read -r -p 'Choose an option to change, or 6 to continue: ' setup_option
+  echo '  6) HTTPS (private CA):      '"$https_summary"
+  echo '  7) Continue with install'
+  read -r -p 'Choose an option to change, or 7 to continue: ' setup_option
   case "$setup_option" in
     1)
       toggle_option expose_lan
@@ -104,8 +110,15 @@ while true; do
         echo 'UFW access is available when LAN access is enabled.'
       fi
       ;;
-    6) break ;;
-    *) echo 'Choose 1-6.' ;;
+    6)
+      toggle_option enable_https
+      if [[ "$enable_https" == "y" ]]; then
+        echo 'HTTPS will use a private local certificate authority.'
+        echo 'Each browser device must trust the generated CA certificate before microphone access is allowed.'
+      fi
+      ;;
+    7) break ;;
+    *) echo 'Choose 1-7.' ;;
   esac
 done
 
@@ -138,6 +151,9 @@ apt-get install -y ca-certificates curl openssl python3
 if [[ "$configure_ufw" =~ ^[Yy]$ ]] && ! command -v ufw >/dev/null 2>&1; then
   apt-get install -y ufw
 fi
+if [[ "$enable_https" =~ ^[Yy]$ ]] && ! command -v nginx >/dev/null 2>&1; then
+  apt-get install -y nginx
+fi
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
   owner_password_hash="$(printf '%s' "$owner_password" | python3 "$APP_DIR/scripts/hash-password.py")"
   unset owner_password owner_password_confirm
@@ -158,12 +174,17 @@ if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
 else
   bind_host="127.0.0.1"
 fi
-python3 - "$ENV_FILE" "$bind_host" "$DATA_DIR/opendots.sqlite" "$owner_password_hash" <<'PY'
+app_port="4310"
+if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+  bind_host="127.0.0.1"
+  app_port="4311"
+fi
+python3 - "$ENV_FILE" "$bind_host" "$DATA_DIR/opendots.sqlite" "$owner_password_hash" "$app_port" <<'PY'
 import pathlib, secrets, sys
 path = pathlib.Path(sys.argv[1])
 values = {
     'HOST': sys.argv[2],
-    'PORT': '4310',
+    'PORT': sys.argv[5],
     'DATABASE_PATH': sys.argv[3],
     'OWNER_ID': 'opendots-owner',
     'DO_NOT_TRACK': '1',
@@ -258,8 +279,116 @@ if [[ "$install_browser" =~ ^[Yy]$ ]]; then
   bash "$APP_DIR/deployment/install-local-browser-reader.sh" "$APP_DIR"
 fi
 
+lan_ip="$(hostname -I | awk '{print $1}')"
+access_ip="${lan_ip:-localhost}"
+if [[ "$expose_lan" != "y" ]]; then
+  access_ip="localhost"
+fi
+had_opendots_nginx_site="n"
+if [[ -e /etc/nginx/sites-enabled/opendots-selfhosted.conf || -L /etc/nginx/sites-enabled/opendots-selfhosted.conf ]]; then
+  had_opendots_nginx_site="y"
+fi
+if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+  cert_ip="${lan_ip:-127.0.0.1}"
+  tls_dir="/etc/opendots/tls"
+  nginx_site="/etc/nginx/sites-available/opendots-selfhosted.conf"
+  nginx_enabled="/etc/nginx/sites-enabled/opendots-selfhosted.conf"
+  install -d -o root -g root -m 0755 "$tls_dir"
+
+  # Keep the CA private key on the server and issue a leaf certificate for this host.
+  if [[ ! -s "$tls_dir/ca.key" || ! -s "$tls_dir/opendots-local-ca.crt" ]]; then
+    openssl genrsa -out "$tls_dir/ca.key" 3072
+    chmod 0600 "$tls_dir/ca.key"
+    openssl req -x509 -new -sha256 -days 3650 -key "$tls_dir/ca.key" \
+      -out "$tls_dir/opendots-local-ca.crt" \
+      -subj "/CN=ACTUALLY Open Dots Local CA" \
+      -addext 'basicConstraints=critical,CA:TRUE' \
+      -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+      -addext 'subjectKeyIdentifier=hash'
+  fi
+  openssl genrsa -out "$tls_dir/server.key" 2048
+  openssl req -new -key "$tls_dir/server.key" -out "$tls_dir/server.csr" \
+    -subj "/CN=$cert_ip"
+  cat > "$tls_dir/server.ext" <<EOF
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:localhost,IP:127.0.0.1,IP:$cert_ip
+EOF
+  openssl x509 -req -sha256 -days 825 -in "$tls_dir/server.csr" \
+    -CA "$tls_dir/opendots-local-ca.crt" -CAkey "$tls_dir/ca.key" \
+    -CAcreateserial -out "$tls_dir/server.crt" -extfile "$tls_dir/server.ext"
+  chmod 0644 "$tls_dir/opendots-local-ca.crt" "$tls_dir/server.crt"
+  chown root:www-data "$tls_dir/server.key"
+  chmod 0640 "$tls_dir/server.key"
+  rm -f "$tls_dir/server.csr" "$tls_dir/server.ext" "$tls_dir/ca.srl"
+
+  if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
+    nginx_http_listen="0.0.0.0:4310"
+    nginx_https_listen="0.0.0.0:443"
+  else
+    nginx_http_listen="127.0.0.1:4310"
+    nginx_https_listen="127.0.0.1:443"
+  fi
+  cat > "$nginx_site" <<EOF
+server {
+    listen $nginx_http_listen;
+    server_name _;
+
+    location = /opendots-local-ca.crt {
+        alias $tls_dir/opendots-local-ca.crt;
+        default_type application/x-x509-ca-cert;
+        add_header Content-Disposition 'attachment; filename="opendots-local-ca.crt"';
+    }
+
+    location / {
+        return 308 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen $nginx_https_listen ssl;
+    server_name _;
+    ssl_certificate $tls_dir/server.crt;
+    ssl_certificate_key $tls_dir/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://127.0.0.1:4311;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 360s;
+        proxy_send_timeout 360s;
+    }
+}
+EOF
+  ln -sfn "$nginx_site" "$nginx_enabled"
+else
+  access_ip="${access_ip:-localhost}"
+  # Remove only the site owned by this installer so the app can bind port 4310.
+  rm -f /etc/nginx/sites-enabled/opendots-selfhosted.conf \
+    /etc/nginx/sites-available/opendots-selfhosted.conf
+fi
+
+if [[ "$enable_https" =~ ^[Yy]$ || "$had_opendots_nginx_site" == "y" ]]; then
+  nginx -t
+fi
+
 systemctl daemon-reload
 systemctl enable opendots.service
+systemctl stop opendots.service || true
+if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+  systemctl enable nginx
+  systemctl restart nginx
+elif [[ "$had_opendots_nginx_site" == "y" ]] && systemctl is-active --quiet nginx; then
+  systemctl reload nginx
+fi
 systemctl restart opendots.service
 echo
 echo "Set up model access now? You can connect OmniRoute, OpenRouter, or any OpenAI-compatible endpoint."
@@ -270,8 +399,15 @@ else
 fi
 if [[ "$configure_ufw" =~ ^[Yy]$ ]]; then
   ufw allow 4310/tcp comment 'ACTUALLY Open Dots LAN access'
+  if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+    ufw allow 443/tcp comment 'ACTUALLY Open Dots HTTPS'
+  fi
   if ufw status | grep -q '^Status: active'; then
-    echo "UFW now allows TCP 4310 for ACTUALLY Open Dots."
+    if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+      echo "UFW now allows TCP 4310 (certificate download/redirect) and 443 (HTTPS) for ACTUALLY Open Dots."
+    else
+      echo "UFW now allows TCP 4310 for ACTUALLY Open Dots."
+    fi
   else
     echo "The UFW rule was added, but UFW is inactive; the rule will apply only if you enable UFW later."
     echo "UFW was not enabled automatically, so existing remote-access rules are unchanged."
@@ -280,10 +416,25 @@ fi
 echo
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
   echo "LAN access is enabled. Sign in with the ACTUALLY Open Dots password you set during installation."
-  access_ip="$(hostname -I | awk '{print $1}')"
-  echo "Open http://${access_ip:-localhost}:4310 from another device on your LAN."
+  if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+    echo "Open https://${access_ip}/ from another device on your LAN."
+  else
+    echo "Open http://${access_ip}:4310 from another device on your LAN."
+  fi
 else
-  echo "ACTUALLY Open Dots is installed and running locally. Open http://localhost:4310."
+  if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+    echo "ACTUALLY Open Dots is installed locally. Open https://localhost/."
+  else
+    echo "ACTUALLY Open Dots is installed and running locally. Open http://localhost:4310."
+  fi
+fi
+if [[ "$enable_https" =~ ^[Yy]$ ]]; then
+  echo
+  echo "To allow browser microphone access, trust this local CA on each device before opening the HTTPS address:"
+  echo "  Download: http://${access_ip}:4310/opendots-local-ca.crt"
+  echo "  SHA-256:  $(openssl x509 -noout -fingerprint -sha256 -in /etc/opendots/tls/opendots-local-ca.crt | cut -d= -f2)"
+  echo "On Windows, open the downloaded certificate, choose Current User, and import it into Trusted Root Certification Authorities."
+  echo "Then fully restart the browser. Keep the CA private key on this server; rerun this installer after the server IP changes."
 fi
 echo "Manage model connections and the Resident and Housekeeping roles in Settings → Models / Connections."
 echo "Optional harnesses are installed from Settings → Harnesses; choose only the ones you want."

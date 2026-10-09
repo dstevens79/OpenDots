@@ -240,6 +240,14 @@ describe('API boundaries', () => {
     expect(accepted.status).toBe(200);
     expect(accepted.headers.get('set-cookie')).toContain('HttpOnly');
     expect(accepted.headers.get('set-cookie')).toContain('SameSite=Strict');
+    const proxiedHttps = await app.request('/api/auth/login', {
+      ...json({ password: 'correct-password' }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Forwarded-Proto': 'https',
+      },
+    });
+    expect(proxiedHttps.headers.get('set-cookie')).toContain('; Secure');
     const cookie = accepted.headers.get('set-cookie')!.split(';')[0];
     expect(
       (
