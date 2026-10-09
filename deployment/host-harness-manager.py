@@ -43,7 +43,7 @@ def path(name):
 
 def installed(name):
     executable = {
-        "hermes": path(name) / ".hermes/bin/hermes",
+        "hermes": path(name) / "agent/.hermes/bin/hermes",
         "opencode": path(name) / "node_modules/.bin/opencode",
         "gemini": path(name) / "node_modules/.bin/gemini",
         "codex": path(name) / "node_modules/.bin/codex",
@@ -116,9 +116,9 @@ def start(name):
             env["OPENAI_MODEL"] = settings["model"]
         env["API_SERVER_KEY"] = settings.setdefault("hermesKey", secrets.token_urlsafe(32))
         write_settings(settings)
-        executable = path(name) / ".hermes/bin/hermes"
+        executable = path(name) / "agent/.hermes/bin/hermes"
         args = [str(executable), "gateway"]
-        cwd = path(name)
+        cwd = path(name) / "agent"
     else:
         workspace = ROOT / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
@@ -133,7 +133,8 @@ def start(name):
 def install(name):
     if name == "hermes":
         target = path(name)
-        if target.exists() and not (target / ".git").exists():
+        install_dir = target / "agent"
+        if target.exists() and not (install_dir / ".git").exists():
             backup = target.with_name(f"{target.name}.incomplete-{int(time.time())}")
             target.rename(backup)
         target.mkdir(parents=True, exist_ok=True)
@@ -142,7 +143,7 @@ def install(name):
         installer.chmod(0o700)
         home = target / "home"
         home.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["bash", str(installer), "--non-interactive", "--skip-browser", "--skip-computer-use", "--dir", str(target), "--hermes-home", str(home)], check=True, env={**os.environ, "HERMES_HOME": str(home), "HERMES_INSTALL_DIR": str(target)})
+        subprocess.run(["bash", str(installer), "--non-interactive", "--skip-browser", "--skip-computer-use", "--dir", str(install_dir), "--hermes-home", str(home)], check=True, env={**os.environ, "HERMES_HOME": str(home), "HERMES_INSTALL_DIR": str(install_dir)})
     elif name == "opencode":
         if not shutil.which("npm"):
             raise RuntimeError("Node.js and npm are required on the Ubuntu host; install Node.js 24 first.")
