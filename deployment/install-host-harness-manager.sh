@@ -26,6 +26,10 @@ if ! command -v bwrap >/dev/null 2>&1; then
   apt-get update
   apt-get install -y bubblewrap
 fi
+if ! dpkg-query -W -f='${Status}' libatomic1 2>/dev/null | grep -q 'install ok installed'; then
+  apt-get update
+  apt-get install -y libatomic1
+fi
 if command -v apparmor_parser >/dev/null 2>&1; then
   install -m 0644 "$APP_DIR/deployment/bwrap-userns-restrict.apparmor" /etc/apparmor.d/bwrap-userns-restrict
   apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
