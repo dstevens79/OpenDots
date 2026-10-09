@@ -227,6 +227,7 @@ describe('API boundaries', () => {
       config,
       ownerPasswordHash: 'installer-hash',
       authenticateOwner: async (password) => password === 'correct-password',
+      origin: 'https://opendots.test',
     });
     expect((await app.request('/api/state')).status).toBe(401);
     const denied = await app.request('/api/auth/login', {
@@ -244,9 +245,11 @@ describe('API boundaries', () => {
       ...json({ password: 'correct-password' }),
       headers: {
         'Content-Type': 'application/json',
+        Origin: 'https://opendots.test',
         'X-Forwarded-Proto': 'https',
       },
     });
+    expect(proxiedHttps.status).toBe(200);
     expect(proxiedHttps.headers.get('set-cookie')).toContain('; Secure');
     const cookie = accepted.headers.get('set-cookie')!.split(';')[0];
     expect(

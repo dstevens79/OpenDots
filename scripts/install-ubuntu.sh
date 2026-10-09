@@ -174,13 +174,20 @@ if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
 else
   bind_host="127.0.0.1"
 fi
+lan_ip="$(hostname -I | awk '{print $1}')"
+app_host="${lan_ip:-localhost}"
+if [[ "$expose_lan" != "y" ]]; then
+  app_host="localhost"
+fi
+app_origin=""
 app_port="4310"
 if [[ "$enable_https" =~ ^[Yy]$ ]]; then
   bind_host="127.0.0.1"
   # 4311 belongs to the optional page-reader service.
   app_port="4314"
+  app_origin="https://$app_host"
 fi
-python3 - "$ENV_FILE" "$bind_host" "$DATA_DIR/opendots.sqlite" "$owner_password_hash" "$app_port" <<'PY'
+python3 - "$ENV_FILE" "$bind_host" "$DATA_DIR/opendots.sqlite" "$owner_password_hash" "$app_port" "$app_origin" <<'PY'
 import pathlib, secrets, sys
 path = pathlib.Path(sys.argv[1])
 values = {
@@ -194,8 +201,10 @@ values = {
 if sys.argv[4]:
     values['OWNER_PASSWORD_HASH'] = sys.argv[4]
     values['RUNTIME_TOKEN'] = secrets.token_hex(32)
+if sys.argv[6]:
+    values['APP_ORIGIN'] = sys.argv[6]
 lines = path.read_text().splitlines()
-for key in (*values.keys(), 'OWNER_TOKEN', 'OWNER_PASSWORD_HASH', 'OWNER_USERNAME', 'RUNTIME_TOKEN'):
+for key in (*values.keys(), 'OWNER_TOKEN', 'OWNER_PASSWORD_HASH', 'OWNER_USERNAME', 'RUNTIME_TOKEN', 'APP_ORIGIN'):
     lines = [line for line in lines if not line.startswith(key + '=')]
 for key, value in values.items():
     lines.append(f'{key}={value}')
@@ -280,7 +289,6 @@ if [[ "$install_browser" =~ ^[Yy]$ ]]; then
   bash "$APP_DIR/deployment/install-local-browser-reader.sh" "$APP_DIR"
 fi
 
-lan_ip="$(hostname -I | awk '{print $1}')"
 access_ip="${lan_ip:-localhost}"
 if [[ "$expose_lan" != "y" ]]; then
   access_ip="localhost"
