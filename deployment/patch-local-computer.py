@@ -29,7 +29,12 @@ for filename, edits in replacements.items():
     source = filename.read_text()
     for old, new in edits:
         count = source.count(old)
-        if count != 1:
+        if count == 1:
+            source = source.replace(old, new)
+        elif count == 0 and source.count(new) == 1:
+            # The installer can be rerun against its existing pinned checkout.
+            # Accept the exact patched form instead of failing or patching twice.
+            continue
+        else:
             raise SystemExit(f"Expected one patch point in {filename}, found {count}: {old!r}")
-        source = source.replace(old, new)
     filename.write_text(source)
