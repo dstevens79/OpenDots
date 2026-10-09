@@ -434,26 +434,58 @@ export class DotAgent extends AbstractAgent {
                 ),
               ]
             : []),
-          ...(configuredProvider.openCodeUrl
+          ...(configuredProvider.openCodeUrl ||
+          (this.config.harnessManagerUrl && this.config.harnessManagerToken)
             ? [
                 defineTool({
                   name: 'delegate_to_opencode',
                   description:
-                    'Delegate a coding or workspace task to the configured OpenCode harness. It can access the workspace configured on that server. Use only for tasks the owner asked ACTUALLY Open Dots to complete; summarize the result and any changed files.',
+                    'Delegate an owner-requested task or explicit harness test to the configured or machine-installed OpenCode harness. It uses the selected model endpoint and its own persistent workspace. Report the returned result and any changed files.',
                   parameters: z.object({
                     task: z.string().trim().min(1).max(12000),
                   }),
                   execute: async ({ task }) => {
                     check();
-                    const base = configuredProvider.openCodeUrl!.replace(
-                      /\/$/,
-                      '',
-                    );
+                    let openCodeUrl = configuredProvider.openCodeUrl;
+                    let openCodePassword =
+                      configuredProvider.openCodePassword;
+                    if (
+                      this.config.harnessManagerUrl &&
+                      this.config.harnessManagerToken &&
+                      (!openCodeUrl || !openCodePassword)
+                    ) {
+                      const manager = this.config.harnessManagerUrl.replace(
+                        /\/$/,
+                        '',
+                      );
+                      const credentials = await fetch(
+                        `${manager}/credentials`,
+                        {
+                          headers: {
+                            Authorization: `Bearer ${this.config.harnessManagerToken}`,
+                          },
+                          signal: controller.signal,
+                        },
+                      );
+                      if (!credentials.ok)
+                        throw new Error(
+                          'Could not load the machine OpenCode connection.',
+                        );
+                      const managed = (await credentials.json()) as {
+                        openCodeUrl?: string;
+                        openCodePassword?: string;
+                      };
+                      openCodeUrl ||= managed.openCodeUrl;
+                      openCodePassword ||= managed.openCodePassword;
+                    }
+                    if (!openCodeUrl)
+                      throw new Error('OpenCode has no server URL configured.');
+                    const base = openCodeUrl.replace(/\/$/, '');
                     const headers: Record<string, string> = {
                       'Content-Type': 'application/json',
                     };
-                    if (configuredProvider.openCodePassword)
-                      headers.Authorization = `Basic ${Buffer.from(`opencode:${configuredProvider.openCodePassword}`).toString('base64')}`;
+                    if (openCodePassword)
+                      headers.Authorization = `Basic ${Buffer.from(`opencode:${openCodePassword}`).toString('base64')}`;
                     const sessionResponse = await fetch(`${base}/session`, {
                       method: 'POST',
                       headers,
@@ -514,6 +546,11 @@ export class DotAgent extends AbstractAgent {
         const harnessContext = [
           configuredProvider.openCodeUrl
             ? 'A server-managed OpenCode harness is configured for delegated coding and workspace tasks; use it through its provided tools when appropriate, and report only results returned by the harness.'
+            : '',
+          !configuredProvider.openCodeUrl &&
+          this.config.harnessManagerUrl &&
+          this.config.harnessManagerToken
+            ? 'A machine-installed OpenCode harness is available through delegate_to_opencode; it uses the selected model endpoint and its managed machine server.'
             : '',
           this.config.harnessManagerUrl && this.config.harnessManagerToken
             ? 'Use list_local_harnesses to check installed and running machine tools. Hermes, Codex, and Grok Build have delegation tools; Hermes needs a working model/provider connection, and Codex and Grok Build need sign-in. Each delegated task uses a separate persistent workspace per Dot. OpenCode has a delegation tool when its server connection is configured. Hermes can also be selected as a saved model connection. Gemini is used through saved provider connections; never reuse Google-account Gemini CLI OAuth through ACTUALLY Open Dots.'

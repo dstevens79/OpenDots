@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -130,7 +131,24 @@ def start(name):
     else:
         workspace = ROOT / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
+        home = path(name) / "home"
+        home.mkdir(parents=True, exist_ok=True)
+        env["HOME"] = str(home)
         env["OPENCODE_SERVER_PASSWORD"] = settings.setdefault("openCodePassword", secrets.token_urlsafe(24))
+        if settings.get("baseUrl") and settings.get("model"):
+            model = settings["model"]
+            env["OPENCODE_CONFIG_CONTENT"] = json.dumps({
+                "$schema": "https://opencode.ai/config.json",
+                "model": "opendots/" + model,
+                "provider": {
+                    "opendots": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "name": "ACTUALLY Open Dots configured endpoint",
+                        "options": {"baseURL": settings["baseUrl"], "apiKey": settings.get("apiKey", "")},
+                        "models": {model: {"name": model}},
+                    }
+                },
+            })
         write_settings(settings)
         executable = path(name) / "node_modules/.bin/opencode"
         args = [str(executable), "serve", "--hostname", "127.0.0.1", "--port", "4096"]
@@ -255,6 +273,37 @@ def test(name, verify_chat=True):
                 raise RuntimeError("Hermes accepted the test but returned no answer.")
             chat_summary = " The test reply was: " + str(answer["choices"][0]["message"]["content"])[:300]
         return {"ok": True, "detail": "Hermes is ready; available models: " + ", ".join(models[:5]) + chat_summary}
+    if verify_chat:
+        settings = read_settings()
+        request = urllib.request.Request(url)
+        if settings.get("openCodePassword"):
+            raw = ("opencode:" + settings["openCodePassword"]).encode()
+            request.add_header("Authorization", "Basic " + base64.b64encode(raw).decode())
+        with urllib.request.urlopen(request, timeout=10) as response:
+            json.loads(response.read())
+        headers = {"Content-Type": "application/json"}
+        if settings.get("openCodePassword"):
+            headers["Authorization"] = "Basic " + base64.b64encode(("opencode:" + settings["openCodePassword"]).encode()).decode()
+        session_request = urllib.request.Request(
+            OPENCODE_URL.rstrip("/") + "/session",
+            data=json.dumps({"title": "ACTUALLY Open Dots connection test"}).encode(),
+            method="POST", headers=headers,
+        )
+        with urllib.request.urlopen(session_request, timeout=15) as response:
+            session_id = json.loads(response.read()).get("id")
+        if not isinstance(session_id, str):
+            raise RuntimeError("OpenCode started a session without returning its ID.")
+        message_request = urllib.request.Request(
+            OPENCODE_URL.rstrip("/") + "/session/" + urllib.parse.quote(session_id, safe="") + "/message",
+            data=json.dumps({"parts": [{"type": "text", "text": "Reply exactly: OpenCode is ready."}]}).encode(),
+            method="POST", headers=headers,
+        )
+        with urllib.request.urlopen(message_request, timeout=45) as response:
+            answer = json.loads(response.read())
+        text = "\n".join(part.get("text", "") for part in answer.get("parts", []) if part.get("type") == "text" and isinstance(part.get("text"), str))
+        if not text:
+            raise RuntimeError("OpenCode accepted the test but returned no text answer.")
+        return {"ok": True, "detail": "OpenCode answered: " + text[:300]}
     return {"ok": True, "detail": "OpenCode server is reachable on this Ubuntu machine."}
 
 
@@ -456,7 +505,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.local_computer("GET")
         if self.path == "/credentials":
             settings = read_settings()
-            return self.reply(200, {"hermesKey": settings.get("hermesKey", ""), "openCodePassword": settings.get("openCodePassword", "")})
+            return self.reply(200, {"hermesKey": settings.get("hermesKey", ""), "openCodePassword": settings.get("openCodePassword", ""), "openCodeUrl": OPENCODE_URL})
         if self.path.startswith("/run/"):
             run_id = self.path.removeprefix("/run/")
             with run_lock:
@@ -506,8 +555,10 @@ class Handler(BaseHTTPRequestHandler):
                 if data.get(source):
                     settings[destination] = data[source]
             write_settings(settings)
-            if model_config_changed and installed("hermes") and alive("hermes"):
-                start("hermes")
+            if model_config_changed:
+                for name in ("hermes", "opencode"):
+                    if installed(name) and alive(name):
+                        start(name)
             return self.reply(200, {"ok": True})
         name = data.get("harness")
         if name not in HARNESS_NAMES:

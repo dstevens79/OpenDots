@@ -1281,9 +1281,9 @@ export function WorkspaceDialog({
                         />
                       </label>
                       <p className="muted">
-                        OpenCode has a separate session API, so its server check
-                        verifies reachability; it does not route ACTUALLY Open
-                        Dots chat through the OpenCode agent.
+                        Dots can delegate tasks to this OpenCode server. It uses
+                        the selected model endpoint and keeps its own task
+                        workspace.
                       </p>
                     </>
                   </>
