@@ -256,10 +256,10 @@ def run_harness(name, dot_id, task):
     env.pop("API_SERVER_KEY", None)
     env.pop("LOCAL_COMPUTER_TOKEN", None)
     env.pop("OPENAI_API_KEY", None)
-    env["HOME"] = "/tmp/opendots-home"
+    env["HOME"] = str(ROOT / "hermes/home") if name == "hermes" else "/tmp/opendots-home"
     env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/tmp/opendots-cli/node_modules/.bin:/tmp/opendots-home/.grok/bin"
     if name == "hermes":
-        env["HERMES_HOME"] = "/tmp/opendots-home"
+        env["HERMES_HOME"] = str(ROOT / "hermes/home")
         env["HERMES_INSTALL_DIR"] = str(ROOT / "hermes/agent")
         settings = read_settings()
         if settings.get("apiKey"):
@@ -299,14 +299,14 @@ def run_harness(name, dot_id, task):
     if name == "codex":
         args += ["--ro-bind", str(profile / "node_modules"), "/tmp/opendots-cli/node_modules"]
     args += [
-        "--bind", str(home), "/tmp/opendots-home",
+        *( ["--bind", str(home), "/tmp/opendots-home"] if name != "hermes" else []),
         "--bind", str(workspace), "/tmp/opendots-workspace",
         *(["--ro-bind", str(home / ".grok/bin"), "/tmp/opendots-home/.grok/bin"] if name == "grok" else []),
         "--tmpfs", str(ROOT),
-        *( ["--dir", str(ROOT / "hermes"), "--dir", str(ROOT / "hermes/agent"), "--ro-bind", str(profile / "agent"), str(ROOT / "hermes/agent"), "--dir", str(ROOT / "hermes/home"), "--dir", str(ROOT / "hermes/home/tools"), "--ro-bind", str(home / "tools"), str(ROOT / "hermes/home/tools")] if name == "hermes" else []),
+        *( ["--dir", str(ROOT / "hermes"), "--dir", str(ROOT / "hermes/home"), "--bind", str(home), str(ROOT / "hermes/home"), "--dir", str(ROOT / "hermes/agent"), "--ro-bind", str(profile / "agent"), str(ROOT / "hermes/agent")] if name == "hermes" else []),
         "--ro-bind", "/dev/null", "/etc/opendots-harness-manager.env",
         "--proc", "/proc", "--dev", "/dev",
-        "--setenv", "HOME", "/tmp/opendots-home",
+        "--setenv", "HOME", env["HOME"],
         "--chdir", "/tmp/opendots-workspace", "--", *command,
     ]
     run_id = str(uuid.uuid4())
