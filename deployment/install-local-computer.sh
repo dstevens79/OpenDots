@@ -135,5 +135,6 @@ path.write_text(text)
 PY
 systemctl daemon-reload
 systemctl enable --now opendots-local-computer.service
+systemctl restart opendots-local-computer.service
 systemctl restart opendots-harness-manager.service
 echo "Local Chrome computer installed. Restart ACTUALLY Open Dots to enable COMPUTER_MODE=local-chrome."
