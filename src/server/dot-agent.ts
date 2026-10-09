@@ -25,6 +25,7 @@ import type { PlatformConfig } from './platform-config.js';
 import { browserResponse } from './research.js';
 import { isScheduledTaskMessage } from '../shared/scheduled-message.js';
 import { providerForTurn } from './model-role.js';
+import { canonicalToolCallArgumentStream } from './canonical-tool-call-stream.js';
 const channelError = () => ({
   type: EventType.RUN_ERROR,
   message:
@@ -532,21 +533,23 @@ export class DotAgent extends AbstractAgent {
                   message.role !== 'system' && message.role !== 'developer',
               ),
             });
-            return chat({
-              adapter,
-              messages: converted.messages,
-              systemPrompts: [prompt, ...converted.systemPrompts],
-              abortController: ctx.abortController,
-              threadId: ctx.input.threadId,
-              runId: ctx.input.runId,
-              modelOptions: { max_completion_tokens: 2200 },
-              agentLoopStrategy: maxIterations(5),
-              tools: [
-                ...tanstackTools(serverTools),
-                ...connected,
-                ...converted.tools,
-              ],
-            });
+            return canonicalToolCallArgumentStream(
+              chat({
+                adapter,
+                messages: converted.messages,
+                systemPrompts: [prompt, ...converted.systemPrompts],
+                abortController: ctx.abortController,
+                threadId: ctx.input.threadId,
+                runId: ctx.input.runId,
+                modelOptions: { max_completion_tokens: 2200 },
+                agentLoopStrategy: maxIterations(5),
+                tools: [
+                  ...tanstackTools(serverTools),
+                  ...connected,
+                  ...converted.tools,
+                ],
+              }),
+            );
           },
         });
         subscription = this.inner
