@@ -79,6 +79,20 @@ export function createApp({
       );
     return result;
   };
+  const syncHarnessModelConnection = async (
+    provider = store.providerConfig(),
+  ) => {
+    const resident = provider.connections?.find(
+      (connection) => connection.id === provider.residentConnectionId,
+    );
+    if (!resident || resident.kind === 'hermes') return;
+    await requestHarnessManager('/configure', {
+      kind: resident.kind,
+      baseUrl: resident.baseUrl,
+      model: provider.model || resident.model,
+      apiKey: resident.apiKey ?? '',
+    });
+  };
   app.use(
     '/api/*',
     bodyLimit({
@@ -593,7 +607,7 @@ export function createApp({
       voiceName: platform.config.voiceName,
     });
     try {
-      await requestHarnessManager('/configure', provider);
+      await syncHarnessModelConnection(provider);
     } catch {
       // Host harnesses can be installed later; provider settings remain usable without them.
     }
@@ -810,7 +824,10 @@ export function createApp({
         credentials.hermesKey
       )
         patch.apiKey = credentials.hermesKey;
-      if (Object.keys(patch).length) store.updateProviderConfig(patch);
+      const refreshed = Object.keys(patch).length
+        ? store.updateProviderConfig(patch)
+        : current;
+      await syncHarnessModelConnection(refreshed);
       return c.json(status);
     } catch (error) {
       return c.json(

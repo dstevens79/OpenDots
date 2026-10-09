@@ -107,7 +107,7 @@ def start(name):
     if name == "hermes":
         home = path(name) / "home"
         home.mkdir(parents=True, exist_ok=True)
-        env.update({"HERMES_HOME": str(home), "API_SERVER_ENABLED": "true", "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": "8642"})
+        env.update({"HERMES_HOME": str(home), "HERMES_INSTALL_DIR": str(path(name) / "agent"), "API_SERVER_ENABLED": "true", "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": "8642"})
         if settings.get("apiKey"):
             env["OPENAI_API_KEY"] = settings["apiKey"]
         if settings.get("baseUrl"):
@@ -117,6 +117,9 @@ def start(name):
         env["API_SERVER_KEY"] = settings.setdefault("hermesKey", secrets.token_urlsafe(32))
         write_settings(settings)
         executable = path(name) / "agent/.hermes/bin/hermes"
+        if settings.get("baseUrl") and settings.get("model"):
+            subprocess.run([str(executable), "config", "set", "model.provider", "openai-api"], check=True, timeout=30, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            subprocess.run([str(executable), "config", "set", "model.default", settings["model"]], check=True, timeout=30, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         args = [str(executable), "gateway"]
         cwd = path(name) / "agent"
     else:
@@ -179,7 +182,7 @@ def install(name):
         start(name)
 
 
-def test(name):
+def test(name, verify_chat=True):
     if not installed(name):
         raise RuntimeError(f"{name} is not installed")
     if name in CLI_HARNESSES:
@@ -226,7 +229,27 @@ def test(name):
         models = [item.get("id") for item in data.get("data", []) if item.get("id")]
         if not models:
             raise RuntimeError("Hermes is running but no model/provider is configured.")
-        return {"ok": True, "detail": "Hermes is ready; available models: " + ", ".join(models[:5])}
+        chat_summary = ""
+        if verify_chat:
+            chat = urllib.request.Request(
+                "http://127.0.0.1:8642/v1/chat/completions",
+                data=json.dumps({"model": models[0], "messages": [{"role": "user", "content": "Reply exactly: Hermes is ready."}], "max_tokens": 24, "stream": False}).encode(),
+                method="POST",
+                headers={"Authorization": "Bearer " + settings.get("hermesKey", ""), "Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(chat, timeout=45) as response:
+                    answer = json.loads(response.read())
+            except urllib.error.HTTPError as error:
+                try:
+                    detail = json.loads(error.read()).get("error", {}).get("message", "")
+                except (ValueError, AttributeError):
+                    detail = ""
+                raise RuntimeError(str(detail or "Hermes could not complete a chat request.")[:500]) from error
+            if not (answer.get("choices") or [{}])[0].get("message", {}).get("content"):
+                raise RuntimeError("Hermes accepted the test but returned no answer.")
+            chat_summary = " The test reply was: " + str(answer["choices"][0]["message"]["content"])[:300]
+        return {"ok": True, "detail": "Hermes is ready; available models: " + ", ".join(models[:5]) + chat_summary}
     return {"ok": True, "detail": "OpenCode server is reachable on this Ubuntu machine."}
 
 
@@ -237,7 +260,7 @@ def run_harness(name, dot_id, task):
         raise RuntimeError("Delegation requires a working Bubblewrap isolation setup. Reinstall or reconfigure the host harness manager before delegating tasks.")
     if not installed(name):
         raise RuntimeError(f"{name} is not installed")
-    readiness = test(name)
+    readiness = test(name, verify_chat=False) if name == "hermes" else test(name)
     if name in ("codex", "grok") and not readiness.get("authenticated"):
         raise RuntimeError(f"{name} is installed but not signed in. Use Sign in in Harnesses settings first.")
     if name in ("codex", "grok") and not readiness.get("sandboxReady"):
@@ -468,15 +491,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(409, {"accepted": False, "error": str(error)[:500]})
         if self.path == "/configure":
             settings = read_settings()
+            model_config_changed = False
             if data.get("kind") != "hermes":
                 for source, destination in (("baseUrl", "baseUrl"), ("model", "model"), ("apiKey", "apiKey")):
-                    if data.get(source):
+                    if source in data and isinstance(data[source], str):
+                        model_config_changed = model_config_changed or settings.get(destination, "") != data[source]
                         settings[destination] = data[source]
             for source, destination in (("openCodeUrl", "openCodeUrl"), ("openCodePassword", "openCodePassword")):
                 if data.get(source):
                     settings[destination] = data[source]
             write_settings(settings)
-            if installed("hermes") and alive("hermes"):
+            if model_config_changed and installed("hermes") and alive("hermes"):
                 start("hermes")
             return self.reply(200, {"ok": True})
         name = data.get("harness")
