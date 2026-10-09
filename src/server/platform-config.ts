@@ -10,6 +10,7 @@ export interface PlatformConfig extends WebConfig {
   computerToken?: string;
   computerNamespace?: string;
   computerMode?: 'local-chrome' | 'managed';
+  computerAdminAccess?: boolean;
   harnessManagerUrl?: string;
   harnessManagerToken?: string;
   browserUrl?: string;

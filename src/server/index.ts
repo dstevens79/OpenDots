@@ -51,6 +51,7 @@ const config: PlatformConfig = {
   computerNamespace: process.env.COMPUTER_NAMESPACE,
   computerMode:
     process.env.COMPUTER_MODE === 'local-chrome' ? 'local-chrome' : 'managed',
+  computerAdminAccess: process.env.COMPUTER_ADMIN_ACCESS === 'true',
   harnessManagerUrl: process.env.HARNESS_MANAGER_URL,
   harnessManagerToken: process.env.HARNESS_MANAGER_TOKEN,
   voiceKey: process.env.VOICE_API_KEY,
