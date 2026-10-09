@@ -61,10 +61,6 @@ export class ComputerService {
     const policy = this.workspace.computers.permissions(id);
     if (!policy.enabled || (kind && !policy[kind]))
       throw new Error('Computer permission is disabled.');
-    if (kind === 'shell' && this.config.computerMode === 'local-chrome')
-      throw new Error(
-        'Host terminal access is not available in local Chrome mode. Use an installed Harness for command-line tasks.',
-      );
     if (actor === 'agent' && this.paused())
       throw new Error('Agents are paused.');
   }
@@ -196,9 +192,20 @@ export class ComputerService {
     return listing.computers.find((c) => c.botId === id);
   }
   private async running(id: string, signal?: AbortSignal) {
-    const state = await this.existing(id, signal);
+    let state = await this.existing(id, signal);
+    if (!state || state.status !== 'running') {
+      state = stateSchema.parse(
+        await this.supervisor(
+          this.config.computerMode === 'local-chrome'
+            ? `/computer/${id}/start`
+            : `/computers/${id}/ensure`,
+          {},
+          signal,
+        ),
+      );
+    }
     if (!state || state.status !== 'running')
-      throw new Error('Start this Dot’s computer first.');
+      throw new Error('Could not start this Dot’s computer.');
     return this.endpoint(id, state);
   }
   async status(id: string): Promise<ComputerStatus> {
@@ -207,7 +214,6 @@ export class ComputerService {
       configured: this.configured,
       permissions: {
         ...this.workspace.computers.permissions(id),
-        ...(this.localChrome ? { shell: false } : {}),
       },
       audit: this.workspace.computers.audit(id),
     };

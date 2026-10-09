@@ -899,17 +899,6 @@ export function WorkspaceDialog({
                         />
                       </label>
                       <label className="field-label">
-                        Default model
-                        <input
-                          value={selectedConnection.model}
-                          onChange={(e) =>
-                            updateConnection(selectedConnection.id, {
-                              model: e.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                      <label className="field-label">
                         API key{' '}
                         {selectedConnection.hasApiKey &&
                         !selectedConnection.apiKey
@@ -1078,19 +1067,25 @@ export function WorkspaceDialog({
                     </label>
                     <label className="field-label">
                       Resident AI model
-                      <input
-                        list="resident-model-options"
+                      <select
                         value={provider.model}
                         onChange={(e) =>
                           setProvider({ ...provider, model: e.target.value })
                         }
-                        placeholder="Type or choose an available model"
-                      />
-                      <datalist id="resident-model-options">
+                      >
+                        <option value="">Choose a model</option>
                         {modelChoices.map((model) => (
-                          <option key={model} value={model} />
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
                         ))}
-                      </datalist>
+                        {provider.model &&
+                          !modelChoices.includes(provider.model) && (
+                            <option value={provider.model}>
+                              {provider.model} (saved)
+                            </option>
+                          )}
+                      </select>
                     </label>
                     <button
                       type="button"
@@ -1167,8 +1162,7 @@ export function WorkspaceDialog({
                     </label>
                     <label className="field-label">
                       Housekeeping model
-                      <input
-                        list="housekeeping-model-options"
+                      <select
                         value={provider.housekeepingModel}
                         onChange={(e) =>
                           setProvider({
@@ -1176,13 +1170,22 @@ export function WorkspaceDialog({
                             housekeepingModel: e.target.value,
                           })
                         }
-                        placeholder="Blank uses the connection default model"
-                      />
-                      <datalist id="housekeeping-model-options">
+                      >
+                        <option value="">Choose a model</option>
                         {housekeepingModelChoices.map((model) => (
-                          <option key={model} value={model} />
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
                         ))}
-                      </datalist>
+                        {provider.housekeepingModel &&
+                          !housekeepingModelChoices.includes(
+                            provider.housekeepingModel,
+                          ) && (
+                            <option value={provider.housekeepingModel}>
+                              {provider.housekeepingModel} (saved)
+                            </option>
+                          )}
+                      </select>
                     </label>
                     <button
                       type="button"
@@ -1495,8 +1498,9 @@ export function WorkspaceDialog({
                     <legend>Local dictation (Whisper)</legend>
                     <p className="muted">
                       Whisper runs in this browser and inserts recognized text
-                      into chat. The model downloads on first use and stays
-                      cached by the browser.
+                      into chat. Audio is transcribed on this device; only the
+                      model files download on first use and stay cached by the
+                      browser.
                     </p>
                     <label className="field-label">
                       Whisper model
@@ -1531,10 +1535,24 @@ export function WorkspaceDialog({
                         ? 'Stop and transcribe'
                         : 'Record a Whisper test'}
                     </button>
-                    {whisperTranscript && (
-                      <div className="muted" role="status">
-                        <strong>Recognized text:</strong> {whisperTranscript}
-                      </div>
+                    <label className="field-label">
+                      Test transcript
+                      <textarea
+                        aria-label="Whisper test transcript"
+                        value={whisperTranscript}
+                        readOnly
+                        rows={4}
+                        placeholder={
+                          whisperProcessing
+                            ? 'Transcribing…'
+                            : 'Your recognized words will appear here.'
+                        }
+                      />
+                    </label>
+                    {providerNotice && (
+                      <p className="muted" role="status">
+                        {providerNotice}
+                      </p>
                     )}
                     <p className="muted">
                       In any chat, use the microphone button beside the message

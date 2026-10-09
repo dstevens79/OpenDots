@@ -35,6 +35,7 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
     busy: false,
     loaded: false,
     running: false,
+    startAttempted: false,
   });
   const controller = useRef<AbortController | null>(null);
   const base = `/dots/${encodeURIComponent(dot.id)}/computer`;
@@ -54,11 +55,30 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
       lifecycle.current.loaded = true;
       lifecycle.current.running = next.state === 'running';
       setError('');
-      if (
-        next.state === 'running' &&
-        next.permissions.browser &&
-        next.permissions.enabled
-      ) {
+      if (next.state === 'stopped' && !lifecycle.current.startAttempted) {
+        lifecycle.current.startAttempted = true;
+        try {
+          const started = await api<ComputerStatus>(
+            `${base}/start`,
+            'POST',
+            {},
+          );
+          if (current()) {
+            setStatus(started);
+            lifecycle.current.running = started.state === 'running';
+            if (started.state === 'unavailable')
+              setError(started.error || 'Could not start this computer.');
+          }
+        } catch (cause) {
+          if (current())
+            setError(
+              cause instanceof Error
+                ? cause.message
+                : 'Could not start this computer.',
+            );
+        }
+      }
+      if (next.state === 'running') {
         try {
           const capture = await api<Screen>(
             `${base}/actions`,
@@ -162,10 +182,10 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
   };
   const action = (action: ComputerAction, input: unknown, showOutput = false) =>
     run('/actions', { action, input }, 'POST', showOutput);
-  const running = status?.state === 'running' && status.permissions.enabled;
+  const running = status?.state === 'running';
   const human =
     status?.control?.holder === 'human' && !status.control.transitioning;
-  const browser = !!running && !!status?.permissions.browser;
+  const browser = !!running;
   return (
     <section
       className="computer-panel"
@@ -186,7 +206,13 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
           <div className="computer-status">
             <strong>{status.state.replaceAll('_', ' ')}</strong>
             {status.state !== 'running' && (
-              <button disabled={busy} onClick={() => void refresh()}>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  lifecycle.current.startAttempted = false;
+                  void refresh();
+                }}
+              >
                 Refresh
               </button>
             )}
@@ -240,9 +266,6 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                 className="computer-section computer-browser"
                 hidden={tab !== 'Browser'}
               >
-                {!status.permissions.browser && (
-                  <p>Enable Browser permission to use the screen.</p>
-                )}
                 <form
                   className="computer-row"
                   onSubmit={(event) => {
@@ -321,7 +344,7 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                   </>
                 ) : (
                   <p className="computer-screen-empty">
-                    {running && status.permissions.browser
+                    {running
                       ? 'Waiting for the browser screen…'
                       : 'Start the computer with Browser permission to see its screen.'}
                   </p>
@@ -474,23 +497,18 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                     value={path}
                     onChange={(event) => setPath(event.target.value)}
                     placeholder="notes.txt"
-                    disabled={!running || !status.permissions.files || busy}
+                    disabled={!running || busy}
                   />
                 </label>
                 <div className="computer-actions">
                   <button
-                    disabled={!running || !status.permissions.files || busy}
+                    disabled={!running || busy}
                     onClick={() => void action('files_list', { path }, true)}
                   >
                     List files
                   </button>
                   <button
-                    disabled={
-                      !running ||
-                      !status.permissions.files ||
-                      busy ||
-                      !path.trim()
-                    }
+                    disabled={!running || busy || !path.trim()}
                     onClick={() =>
                       void action('files_read', { path }, true).then(
                         (result) => {
@@ -515,29 +533,19 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                     aria-label="File contents to save"
                     value={contents}
                     onChange={(event) => setContents(event.target.value)}
-                    disabled={!running || !status.permissions.files || busy}
+                    disabled={!running || busy}
                     maxLength={100000}
                     rows={5}
                   />
                 </label>
                 <button
-                  disabled={
-                    !running ||
-                    !status.permissions.files ||
-                    busy ||
-                    !path.trim()
-                  }
+                  disabled={!running || busy || !path.trim()}
                   onClick={() =>
                     void action('files_write', { path, contents }, true)
                   }
                 >
                   Save file (replace contents)
                 </button>
-                {!status.permissions.files && (
-                  <p>
-                    Enable Workspace files permission to use these controls.
-                  </p>
-                )}
               </details>
               <details
                 className="computer-section"
@@ -561,23 +569,13 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                     onChange={(event) => setCommand(event.target.value)}
                     maxLength={8000}
                     rows={3}
-                    disabled={!running || !status.permissions.shell || busy}
+                    disabled={!running || busy}
                     placeholder="pwd"
                   />
-                  <button
-                    disabled={
-                      !running ||
-                      !status.permissions.shell ||
-                      busy ||
-                      !command.trim()
-                    }
-                  >
+                  <button disabled={!running || busy || !command.trim()}>
                     Run command
                   </button>
                 </form>
-                {!status.permissions.shell && (
-                  <p>Enable Terminal commands permission to run commands.</p>
-                )}
               </details>
               {(output || outputError) &&
                 (tab === 'Files' || tab === 'Terminal') && (
@@ -625,67 +623,6 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
             ) : (
               <p>No computer actions yet.</p>
             )}
-          </details>
-          <details className="computer-settings">
-            <summary>Computer settings</summary>{' '}
-            <details
-              className="computer-permissions"
-              open={!status.permissions.enabled}
-            >
-              <summary>Computer permissions</summary>
-              <p>
-                Choose what {dot.name} and the computer controls can access.
-              </p>
-              {(['enabled', 'browser', 'files', 'shell'] as const).map(
-                (permission) => (
-                  <label key={permission}>
-                    <input
-                      type="checkbox"
-                      checked={status.permissions[permission]}
-                      disabled={busy || !status.configured}
-                      onChange={(event) =>
-                        void run(
-                          '/permissions',
-                          { [permission]: event.target.checked },
-                          'PATCH',
-                        )
-                      }
-                    />
-                    {
-                      {
-                        enabled: 'Enable this computer',
-                        browser: 'Browser',
-                        files: 'Workspace files',
-                        shell: 'Terminal commands',
-                      }[permission]
-                    }
-                  </label>
-                ),
-              )}
-            </details>
-            <div className="computer-actions">
-              <button
-                disabled={
-                  busy ||
-                  !status.configured ||
-                  !status.permissions.enabled ||
-                  status.state === 'running'
-                }
-                onClick={() => void run('/start')}
-              >
-                Start computer
-              </button>
-              <button
-                disabled={busy || status.state !== 'running'}
-                onClick={() => void run('/stop')}
-              >
-                Stop computer
-              </button>
-            </div>
-            <p className="computer-hint">
-              Stopping retains this Dot’s workspace files. Browser sessions may
-              require signing in again.
-            </p>
           </details>
         </>
       )}

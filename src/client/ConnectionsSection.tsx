@@ -70,7 +70,25 @@ export function ConnectionsSection({ dotId }: { dotId: string }) {
       <p className="muted">
         Give this Dot tools from MCP servers. Read-only tools run on their own;
         anything else asks you in chat before it runs. Tokens stay on the
-        server.
+        server. The selected chat model needs tool calling enabled for MCP tools
+        to work. OmniRoute can pass them through when its selected model
+        supports tools. Find servers in the{' '}
+        <a
+          href="https://registry.modelcontextprotocol.io/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          MCP Registry
+        </a>{' '}
+        or review the official{' '}
+        <a
+          href="https://github.com/modelcontextprotocol/servers"
+          target="_blank"
+          rel="noreferrer"
+        >
+          reference servers
+        </a>
+        ; check each server’s transport and trust before adding it.
       </p>
       {connections?.map((connection) => (
         <div className="connection" key={connection.id}>

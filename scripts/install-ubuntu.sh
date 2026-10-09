@@ -245,23 +245,32 @@ EOF
 if [[ "$install_manager" =~ ^[Yy]$ ]]; then
   HARNESS_MANAGER_HOST=127.0.0.1 bash "$APP_DIR/deployment/install-host-harness-manager.sh" "$APP_DIR"
   manager_token="$(sed -n 's/^HARNESS_MANAGER_TOKEN=//p' "$APP_DIR/.env")"
-  if [[ -n "$harness_choices" ]]; then
-    echo
-    echo "Waiting for the local Harness manager to become ready..."
-    manager_ready="n"
-    for _ in {1..30}; do
-      if curl --silent --output /dev/null --max-time 2 http://127.0.0.1:4312/status; then
-        manager_ready="y"
-        break
-      fi
-      sleep 1
-    done
-    if [[ "$manager_ready" != "y" ]]; then
-      echo "The Harness manager did not start listening on 127.0.0.1:4312 within 30 seconds." >&2
-      echo "Check it with: sudo systemctl status opendots-harness-manager" >&2
-      journalctl -u opendots-harness-manager -n 30 --no-pager >&2 || true
-      exit 1
+fi
+if [[ "$install_computer" =~ ^[Yy]$ ]]; then
+  bash "$APP_DIR/deployment/install-local-computer.sh" "$APP_DIR"
+fi
+if [[ "$install_browser" =~ ^[Yy]$ ]]; then
+  bash "$APP_DIR/deployment/install-local-browser-reader.sh" "$APP_DIR"
+fi
+
+# Optional service installers restart the manager. Queue harness jobs only after they
+# finish so a restart cannot terminate background installs halfway through.
+if [[ -n "$harness_choices" ]]; then
+  echo
+  echo "Waiting for the local Harness manager to become ready..."
+  manager_ready="n"
+  for _ in {1..30}; do
+    if curl --silent --output /dev/null --max-time 2 http://127.0.0.1:4312/status; then
+      manager_ready="y"
+      break
     fi
+    sleep 1
+  done
+  if [[ "$manager_ready" != "y" ]]; then
+    echo "The Harness manager did not start listening on 127.0.0.1:4312 within 30 seconds." >&2
+    echo "Check it with: sudo systemctl status opendots-harness-manager" >&2
+    journalctl -u opendots-harness-manager -n 30 --no-pager >&2 || true
+    exit 1
   fi
   for choice in ${harness_choices//,/ }; do
     case "$choice" in
@@ -278,15 +287,7 @@ if [[ "$install_manager" =~ ^[Yy]$ ]]; then
       --data "{\"harness\":\"$harness\"}" >/dev/null
     echo "Queued $harness installation."
   done
-  if [[ -n "$harness_choices" ]]; then
-    echo "Selected Harnesses will finish installing in the background. Check Settings → Harnesses for their status."
-  fi
-fi
-if [[ "$install_computer" =~ ^[Yy]$ ]]; then
-  bash "$APP_DIR/deployment/install-local-computer.sh" "$APP_DIR"
-fi
-if [[ "$install_browser" =~ ^[Yy]$ ]]; then
-  bash "$APP_DIR/deployment/install-local-browser-reader.sh" "$APP_DIR"
+  echo "Selected Harnesses will finish installing in the background. Check Settings → Harnesses for their status."
 fi
 
 access_ip="${lan_ip:-localhost}"

@@ -91,16 +91,16 @@ function fixture(deadline = 1000) {
     },
   };
 }
-it('defaults every permission off and persists policy and metadata-only audit across restart', () => {
+it('defaults the private computer capabilities on and persists policy and metadata-only audit across restart', () => {
   const dir = mkdtempSync(join(tmpdir(), 'computers-'));
   const path = join(dir, 'db');
   let workspace = new WorkspaceStore(path, 'owner');
   const id = workspace.dots()[0].id;
   expect(workspace.computers.permissions(id)).toEqual({
-    enabled: false,
-    browser: false,
-    files: false,
-    shell: false,
+    enabled: true,
+    browser: true,
+    files: true,
+    shell: true,
   });
   workspace.computers.patch(id, { enabled: true, files: true });
   const audit = workspace.computers.begin(id, 'files_write', 'agent');
@@ -170,14 +170,14 @@ it('local Chrome computers route through the authenticated host manager', async 
   });
   const status = await f.service.status(f.id);
   expect(status.state).toBe('running');
-  expect(status.permissions.shell).toBe(false);
+  expect(status.permissions.shell).toBe(true);
   const tools = computerTools(
     f.service,
     f.id,
     () => {},
     new AbortController().signal,
   );
-  expect(tools.some((tool) => tool.name === 'computer_exec')).toBe(false);
+  expect(tools.some((tool) => tool.name === 'computer_exec')).toBe(true);
   const health = f.calls.find((call) => call.url.endsWith('/health'))!;
   expect(health.url).toContain(`/computer/${f.id}/health`);
   expect(new Headers(health.init?.headers).get('authorization')).toBe(
@@ -191,9 +191,9 @@ it('local Chrome computers route through the authenticated host manager', async 
   expect(new Headers(action.init?.headers).get('authorization')).toBe(
     'Bearer supervisor-secret',
   );
-  await expect(
-    f.service.action(f.id, 'exec', { command: 'whoami' }),
-  ).rejects.toThrow('Host terminal access is not available');
+  expect(await f.service.action(f.id, 'exec', { command: 'whoami' })).toEqual({
+    text: 'local result',
+  });
 });
 it('rejects foreign targets, nonexistent Dots, traversal, unexpected inputs and agent human controls', async () => {
   const f = fixture();

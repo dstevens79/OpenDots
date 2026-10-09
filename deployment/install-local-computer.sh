@@ -34,11 +34,13 @@ if [[ ! -d "$OPENBOT_DIR/.git" ]]; then
 fi
 git -C "$OPENBOT_DIR" fetch --depth 1 origin "$OPENBOT_COMMIT"
 git -C "$OPENBOT_DIR" checkout --detach "$OPENBOT_COMMIT"
+python3 "$APP_DIR/deployment/patch-local-computer.py" "$OPENBOT_DIR"
 cd "$OPENBOT_DIR"
 bun install --frozen-lockfile
 bun install --cwd agent-computer --frozen-lockfile
 
 install -d -o opendots-harness -g opendots-harness -m 0700 "$DATA_DIR"
+install -d -o opendots-harness -g opendots-harness -m 0700 "$DATA_DIR/home"
 computer_token="$(sed -n 's/^LOCAL_COMPUTER_TOKEN=//p' "$ENV_FILE")"
 if [[ -z "$computer_token" ]]; then
   computer_token="$(openssl rand -hex 32)"
@@ -71,6 +73,8 @@ Environment=COMPUTER_BROWSER_BACKEND=local-chrome
 Environment=COMPUTER_BROWSER_MODE=headed
 Environment=PORT=4101
 Environment=OPENBOT_LOCAL_COMPUTER_DIR=$DATA_DIR
+Environment=HOME=$DATA_DIR/home
+Environment=COMPUTER_ALLOW_EXEC=on
 ExecStart=/usr/local/bin/bun $OPENBOT_DIR/scripts/start-local-chrome-computer.ts
 Restart=on-failure
 RestartSec=3

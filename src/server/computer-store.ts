@@ -8,6 +8,22 @@ export class ComputerStore {
   constructor(private db: DatabaseSync) {
     db.exec(`CREATE TABLE IF NOT EXISTS computer_permissions(dotId TEXT PRIMARY KEY,value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS computer_audit(id TEXT PRIMARY KEY,dotId TEXT NOT NULL,action TEXT NOT NULL,actor TEXT NOT NULL,outcome TEXT NOT NULL,createdAt INTEGER NOT NULL);`);
+    // Older installs defaulted every Dot to disabled. The current self-hosted
+    // workspace treats its private computer as a built-in capability.
+    db.prepare('UPDATE computer_permissions SET value=? WHERE value=?').run(
+      JSON.stringify({
+        enabled: true,
+        browser: true,
+        files: true,
+        shell: true,
+      }),
+      JSON.stringify({
+        enabled: false,
+        browser: false,
+        files: false,
+        shell: false,
+      }),
+    );
   }
   permissions(id: string): ComputerPermissions {
     const row = this.db
@@ -15,7 +31,7 @@ export class ComputerStore {
       .get(id);
     return row
       ? JSON.parse(String(row.value))
-      : { enabled: false, browser: false, files: false, shell: false };
+      : { enabled: true, browser: true, files: true, shell: true };
   }
   patch(id: string, patch: Partial<ComputerPermissions>) {
     const value = { ...this.permissions(id), ...patch };
