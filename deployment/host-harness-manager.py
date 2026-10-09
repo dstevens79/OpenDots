@@ -94,6 +94,11 @@ def stop(name):
     proc = processes.pop(name, None)
     if proc and proc.poll() is None:
         proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
 
 
 def start(name):
