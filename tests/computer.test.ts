@@ -351,3 +351,21 @@ it('gives agents a safe recovery instruction for stale browser or control confli
   ).rejects.not.toThrow(f.config.computerToken);
   expect(f.workspace.computers.audit(f.id)[0].outcome).toBe('failed');
 });
+
+it('passes safe computer-service error details to agents and redacts credentials', async () => {
+  const f = fixture();
+  f.handle(async () =>
+    Response.json(
+      { error: `Path not found: ${f.config.computerToken}` },
+      { status: 404 },
+    ),
+  );
+  await expect(
+    f.service.action(f.id, 'files_list', { path: 'missing' }, 'agent'),
+  ).rejects.toThrow(
+    'Computer service returned HTTP 404: Path not found: [redacted].',
+  );
+  await expect(
+    f.service.action(f.id, 'files_list', { path: 'missing' }, 'agent'),
+  ).rejects.not.toThrow(f.config.computerToken);
+});

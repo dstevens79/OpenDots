@@ -80,6 +80,9 @@ Environment=PORT=4101
 Environment=OPENBOT_LOCAL_COMPUTER_DIR=$DATA_DIR
 Environment=HOME=$DATA_DIR/home
 Environment=COMPUTER_ALLOW_EXEC=on
+# This native install has no remote policy controller to push per-Dot egress rules.
+# Keep the service's built-in address protections while allowing normal web access.
+Environment=EGRESS_POLICY_REQUIRED=false
 ExecStart=/usr/local/bin/bun $OPENBOT_DIR/scripts/start-local-chrome-computer.ts
 Restart=on-failure
 RestartSec=3

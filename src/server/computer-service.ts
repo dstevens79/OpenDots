@@ -64,6 +64,26 @@ export class ComputerService {
     if (actor === 'agent' && this.paused())
       throw new Error('Agents are paused.');
   }
+  private redact(text: string, token: string) {
+    for (const secret of [
+      token,
+      this.config.computerToken?.trim(),
+      this.config.computerSupervisorToken?.trim(),
+    ])
+      if (secret) text = text.split(secret).join('[redacted]');
+    return text;
+  }
+  private async errorBody(response: Response) {
+    const reader = response.body?.getReader();
+    if (!reader) return '';
+    try {
+      const { value } = await reader.read();
+      await reader.cancel();
+      return new TextDecoder().decode(value?.subarray(0, 8192)).trim();
+    } catch {
+      return '';
+    }
+  }
   private async json(
     url: string,
     token: string,
@@ -92,8 +112,19 @@ export class ComputerService {
         throw new Error(
           'Computer service returned HTTP 409: refresh the browser with computer_snapshot before retrying. If the owner has control, wait for them to release it; do not bypass takeover.',
         );
-      if (!response.ok)
-        throw new Error(`Computer service returned HTTP ${response.status}.`);
+      if (!response.ok) {
+        const body = this.redact(await this.errorBody(response), token);
+        let detail = body;
+        try {
+          const parsed = JSON.parse(body) as { error?: unknown };
+          if (typeof parsed.error === 'string') detail = parsed.error;
+        } catch {
+          // Non-JSON error bodies are still useful diagnostics.
+        }
+        throw new Error(
+          `Computer service returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ''}.`,
+        );
+      }
       if (!response.body)
         throw new Error('Computer service returned an empty response.');
       const reader = response.body.getReader();
@@ -110,13 +141,7 @@ export class ComputerService {
         chunks.push(value);
       }
       // Infrastructure secrets must never leave the gateway even if an upstream response reflects one.
-      let text = Buffer.concat(chunks).toString('utf8');
-      for (const secret of [
-        token,
-        this.config.computerToken?.trim(),
-        this.config.computerSupervisorToken?.trim(),
-      ])
-        if (secret) text = text.split(secret).join('[redacted]');
+      const text = this.redact(Buffer.concat(chunks).toString('utf8'), token);
       return JSON.parse(text);
     } catch (error) {
       if (combined.aborted)
