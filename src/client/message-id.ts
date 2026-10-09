@@ -1,4 +1,4 @@
-/** Create a UUID even when OpenDots is opened from a plain-HTTP LAN address. */
+/** Create a UUID even when ACTUALLY Open Dots is opened from a plain-HTTP LAN address. */
 export function createClientMessageId(cryptoApi: Crypto = crypto): string {
   if (typeof cryptoApi.randomUUID === 'function') return cryptoApi.randomUUID();
 

@@ -13,7 +13,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 if [[ ! -f "$APP_DIR/deployment/host-harness-manager.py" ]]; then
-  echo "Could not find the OpenDots checkout at $APP_DIR." >&2
+  echo "Could not find the ACTUALLY Open Dots checkout at $APP_DIR." >&2
   exit 1
 fi
 if ! command -v npm >/dev/null 2>&1; then
@@ -62,7 +62,7 @@ else
 fi
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=OpenDots machine-level harness manager
+Description=ACTUALLY Open Dots machine-level harness manager
 After=network-online.target
 Wants=network-online.target
 

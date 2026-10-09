@@ -404,7 +404,7 @@ export function WorkspaceDialog({
         >
           <X size={18} />
         </button>
-        <span className="eyebrow">OPENDOTS TEMPLATE</span>
+        <span className="eyebrow">ACTUALLY OPEN DOTS</span>
         <h2 id="dialog-title">{title}</h2>
         <form
           onSubmit={async (e) => {
@@ -700,8 +700,9 @@ export function WorkspaceDialog({
                   </nav>
                   {connectionTab === 'local' && (
                     <p className="muted">
-                      This connects OpenDots to Hermes�s model API. Install and
-                      manage the Hermes harness separately in Harnesses.
+                      This connects ACTUALLY Open Dots to Hermes's model API.
+                      Install and manage the Hermes harness separately in
+                      Harnesses.
                     </p>
                   )}
                   {connectionTab === 'custom' && (
@@ -729,8 +730,9 @@ export function WorkspaceDialog({
                   </label>
                   {connectionTab === 'local' && (
                     <p className="muted">
-                      This connects OpenDots to the Hermes model API. Install
-                      and manage the Hermes harness separately in Harnesses.
+                      This connects ACTUALLY Open Dots to the Hermes model API.
+                      Install and manage the Hermes harness separately in
+                      Harnesses.
                     </p>
                   )}
                   {connectionTab === 'custom' && (
@@ -1103,8 +1105,8 @@ export function WorkspaceDialog({
                       </label>
                       <p className="muted">
                         OpenCode has a separate session API, so its server check
-                        verifies reachability; it does not route OpenDots chat
-                        through the OpenCode agent.
+                        verifies reachability; it does not route ACTUALLY Open
+                        Dots chat through the OpenCode agent.
                       </p>
                     </>
                   </>
@@ -1231,7 +1233,7 @@ export function WorkspaceDialog({
                       [
                         'codex',
                         'OpenAI Codex CLI',
-                        'Install the Codex command-line harness. Its ChatGPT or API sign-in is managed separately from OpenDots model connections.',
+                        'Install the Codex command-line harness. Its ChatGPT or API sign-in is managed separately from ACTUALLY Open Dots model connections.',
                       ],
                       [
                         'grok',
@@ -1285,9 +1287,9 @@ export function WorkspaceDialog({
                         )}
                         {name === 'gemini' && (
                           <p className="muted">
-                            OpenDots does not reuse Google-account CLI OAuth for
-                            model calls. To use Gemini as a role connection, add
-                            a Gemini API key in Connections.
+                            ACTUALLY Open Dots does not reuse Google-account CLI
+                            OAuth for model calls. To use Gemini as a role
+                            connection, add a Gemini API key in Connections.
                           </p>
                         )}
                       </fieldset>

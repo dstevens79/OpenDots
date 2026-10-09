@@ -148,8 +148,8 @@ export function createApp({
         return c.json(
           {
             error: ownerPasswordHash
-              ? 'Enter your OpenDots password to unlock OpenDots.'
-              : 'Enter your owner access token to unlock OpenDots.',
+              ? 'Enter your ACTUALLY Open Dots password to unlock ACTUALLY Open Dots.'
+              : 'Enter your owner access token to unlock ACTUALLY Open Dots.',
           },
           401,
         );
@@ -163,7 +163,10 @@ export function createApp({
         !timingSafeEqual(expected, supplied)
       )
         return c.json(
-          { error: 'Enter your owner access token to unlock OpenDots.' },
+          {
+            error:
+              'Enter your owner access token to unlock ACTUALLY Open Dots.',
+          },
           401,
         );
     }
@@ -188,10 +191,13 @@ export function createApp({
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!body.success)
-      return c.json({ error: 'Enter your OpenDots password.' }, 400);
+      return c.json({ error: 'Enter your ACTUALLY Open Dots password.' }, 400);
     const accepted = await authenticateOwner(body.data.password);
     if (!accepted)
-      return c.json({ error: 'That OpenDots password was not accepted.' }, 401);
+      return c.json(
+        { error: 'That ACTUALLY Open Dots password was not accepted.' },
+        401,
+      );
     const session = randomBytes(32).toString('hex');
     sessions.set(session, Date.now() + sessionLifetimeSeconds * 1000);
     const secure = new URL(c.req.url).protocol === 'https:' ? '; Secure' : '';

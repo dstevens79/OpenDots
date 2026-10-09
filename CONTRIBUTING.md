@@ -1,6 +1,6 @@
-# Contributing to OpenDots
+# Contributing to ACTUALLY Open Dots
 
-OpenDots is a self-hosted personal-agent workspace. Focus changes on Spaces, Dots, local model connections, inspectable background work, and optional machine-level harnesses. Keep integrations optional, native to the host where practical, and clear about which configured services receive user data.
+ACTUALLY Open Dots is a self-hosted personal-agent workspace. Focus changes on Spaces, Dots, local model connections, inspectable background work, and optional machine-level harnesses. Keep integrations optional, native to the host where practical, and clear about which configured services receive user data.
 
 For bugs, include the app mode, Node version, steps to reproduce, expected behavior, and actual behavior. Remove credentials and private page content from logs or screenshots.
 

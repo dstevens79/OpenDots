@@ -1,10 +1,10 @@
-# OpenDots
+# ACTUALLY Open Dots
 
-**Open-source AI coworkers that run on your computer. No OpenDots subscription.**
+**Actually open-source AI coworkers that run on your computer. No subscription.**
 
-Run the app, choose an AI endpoint you already use (local or remote), and create your own Dots. Connections start empty: add only the provider or local harness you want. Your workspace and conversations stay in your OpenDots database.
+Run the app, choose an AI endpoint you already use (local or remote), and create your own Dots. Connections start empty: add only the provider or local harness you want. Your workspace and conversations stay in your ACTUALLY Open Dots database.
 
-OpenDots is a community fork built with [AG-UI](https://docs.ag-ui.com/introduction), [TanStack AI](https://tanstack.com/ai), and the [CopilotKit React SDK](https://github.com/CopilotKit/CopilotKit). Its chat runtime is open-source and self-hosted. No CopilotKit Intelligence account, trial, key, or subscription is needed for chat, pages, or local Whisper dictation.
+ACTUALLY Open Dots is a community fork built with [AG-UI](https://docs.ag-ui.com/introduction), [TanStack AI](https://tanstack.com/ai), and the [CopilotKit React SDK](https://github.com/CopilotKit/CopilotKit). Its chat runtime is open-source and self-hosted. No CopilotKit Intelligence account, trial, key, or subscription is needed for chat, pages, or local Whisper dictation.
 
 ## Quick start
 
@@ -14,7 +14,7 @@ For a self-hosted Ubuntu 24.04 machine, run this once from its terminal:
 sudo apt-get update && sudo apt-get install -y ca-certificates git && sudo git clone --depth 1 --single-branch --branch feat/self-hosted-sse-whisper https://github.com/dstevens79/OpenDots.git /opt/opendots && cd /opt/opendots && sudo bash scripts/install-ubuntu.sh
 ```
 
-The installer enables access from other devices on your LAN by default and asks you to choose an OpenDots password. Choose **No** to keep access on the server itself. It also offers to add a UFW rule for TCP port 4310; it does not enable UFW automatically. OpenDots stores only a salted password hash. Each service runs natively in its own install and data folders. No Docker containers are used. From another device, open `http://<server-ip>:4310`, then go to **Settings → Connections → Add a connection**. Enter the endpoint URL and API key for a service you choose, then select it under **Model roles**. For a local model gateway, use its OpenAI-compatible API URL; no provider is preconfigured. Provider fees, if any, are set by that provider. A local model endpoint can keep inference on your network.
+The installer enables access from other devices on your LAN by default and asks you to choose an ACTUALLY Open Dots password. Choose **No** to keep access on the server itself. It also offers to add a UFW rule for TCP port 4310; it does not enable UFW automatically. ACTUALLY Open Dots stores only a salted password hash. Each service runs natively in its own install and data folders. No Docker containers are used. From another device, open `http://<server-ip>:4310`, then go to **Settings → Connections → Add a connection**. Enter the endpoint URL and API key for a service you choose, then select it under **Model roles**. For a local model gateway, use its OpenAI-compatible API URL; no provider is preconfigured. Provider fees, if any, are set by that provider. A local model endpoint can keep inference on your network.
 
 For development or another operating system, use Node.js 24 and npm:
 
@@ -51,4 +51,4 @@ npm test
 npm run build
 ```
 
-Contributions and security reports: [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). OpenDots is licensed under MIT; see [LICENSE](LICENSE).
+Contributions and security reports: [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). ACTUALLY Open Dots is licensed under MIT; see [LICENSE](LICENSE).

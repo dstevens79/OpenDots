@@ -69,7 +69,7 @@ it('sanitizes errors before they reach a non-web channel', async () => {
     {
       type: EventType.RUN_ERROR,
       message:
-        'OpenDots could not complete this request. Please check the app and try again.',
+        'ACTUALLY Open Dots could not complete this request. Please check the app and try again.',
     },
   ]);
   expect(JSON.stringify(events)).not.toContain('SECRET');

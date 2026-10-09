@@ -13,7 +13,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 if [[ ! -f "$APP_DIR/.env" || ! -f "$ENV_FILE" ]]; then
-  echo "Install the OpenDots host harness manager first." >&2
+  echo "Install the ACTUALLY Open Dots host harness manager first." >&2
   exit 1
 fi
 
@@ -58,7 +58,7 @@ PY
 
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=OpenDots local Chrome computer service
+Description=ACTUALLY Open Dots local Chrome computer service
 After=network-online.target
 Wants=network-online.target
 
@@ -87,4 +87,4 @@ EOF
 systemctl daemon-reload
 systemctl enable --now opendots-local-computer.service
 systemctl restart opendots-harness-manager.service
-echo "Local Chrome computer installed. Restart OpenDots to enable COMPUTER_MODE=local-chrome."
+echo "Local Chrome computer installed. Restart ACTUALLY Open Dots to enable COMPUTER_MODE=local-chrome."

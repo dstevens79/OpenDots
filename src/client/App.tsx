@@ -240,7 +240,9 @@ export function App() {
       <main className="unlock">
         <Mascot />
         <h1>Your own little corner.</h1>
-        <p>Enter the OpenDots password you set during installation.</p>
+        <p>
+          Enter the ACTUALLY Open Dots password you set during installation.
+        </p>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -253,20 +255,20 @@ export function App() {
               setError(
                 err instanceof Error
                   ? err.message
-                  : 'That OpenDots password was not accepted.',
+                  : 'That ACTUALLY Open Dots password was not accepted.',
               );
             }
           }}
         >
           <input
             type="password"
-            aria-label="OpenDots password"
+            aria-label="ACTUALLY Open Dots password"
             autoComplete="current-password"
             value={auth}
             onChange={(e) => setAuth(e.target.value)}
             required
           />
-          <button className="primary">Unlock OpenDots</button>
+          <button className="primary">Unlock ACTUALLY Open Dots</button>
         </form>
         {error && (
           <p className="chat-error" role="alert">
@@ -274,7 +276,7 @@ export function App() {
           </p>
         )}
         <p className="muted">
-          Your password is checked by Ubuntu and is not saved by OpenDots.
+          Your password is stored as a salted hash on this server.
         </p>
       </main>
     );
@@ -296,7 +298,7 @@ export function App() {
       <nav className="icon-rail" aria-label="Workspace navigation">
         <button
           className="rail-brand"
-          aria-label="OpenDots home"
+          aria-label="ACTUALLY Open Dots home"
           onClick={() => {
             setView('chat');
             setSelectedThread(undefined);
@@ -369,7 +371,7 @@ export function App() {
             <i />
             <i />
           </span>
-          OpenDots<span className="wordmark-dot">•</span>
+          ACTUALLY Open Dots<span className="wordmark-dot">•</span>
         </button>
         <button
           className="new-chat nav-item"
@@ -492,7 +494,7 @@ export function App() {
           </button>
           <a
             className="nav-item"
-            href="https://github.com/CopilotKit/OpenDots"
+            href="https://github.com/dstevens79/OpenDots"
             target="_blank"
             rel="noreferrer"
           >

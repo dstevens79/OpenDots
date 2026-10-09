@@ -12,7 +12,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 if [[ ! -f "$APP_DIR/package.json" || ! -f "$APP_DIR/dist/server/browser/index.js" ]]; then
-  echo "Build OpenDots first; expected the browser service in $APP_DIR." >&2
+  echo "Build ACTUALLY Open Dots first; expected the browser service in $APP_DIR." >&2
   exit 1
 fi
 
@@ -57,7 +57,7 @@ fi
 node_bin="/usr/bin/node"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=OpenDots local public-page browser reader
+Description=ACTUALLY Open Dots local public-page browser reader
 After=network-online.target
 Wants=network-online.target
 

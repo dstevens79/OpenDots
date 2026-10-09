@@ -86,7 +86,7 @@ async function captureRuntime(overrides: Record<string, string> = {}) {
   return events;
 }
 
-it('sends OpenDots runtime metadata with CLI identity and without the project key', async () => {
+it('sends ACTUALLY Open Dots runtime metadata with CLI identity and without the project key', async () => {
   const events = await captureRuntime({
     DO_NOT_TRACK: '0',
     COPILOTKIT_TELEMETRY_DISABLED: 'false',

@@ -1,6 +1,6 @@
 # Security
 
-OpenDots is a self-hosted, single-owner application under development. It is not a security-audited autonomous agent or a multi-user service.
+ACTUALLY Open Dots is a self-hosted, single-owner application under development. It is not a security-audited autonomous agent or a multi-user service.
 
 ## Intended boundary
 

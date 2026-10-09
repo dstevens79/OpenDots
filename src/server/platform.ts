@@ -25,7 +25,7 @@ import { providerForTurn } from './model-role.js';
 import { validateRuntimeScope } from './runtime-scope.js';
 import { InMemoryAgentRunner } from '@copilotkit/runtime/v2';
 
-/** Local SSE runner with durable conversation snapshots in OpenDots' SQLite DB. */
+/** Local SSE runner with durable conversation snapshots in ACTUALLY Open Dots' SQLite DB. */
 class SQLiteAgentRunner extends AgentRunner {
   private readonly memory = new InMemoryAgentRunner({
     maxThreads: Infinity,

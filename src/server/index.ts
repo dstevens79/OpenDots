@@ -110,7 +110,7 @@ app.get('/api/*', (c) => c.json({ error: 'Not found.' }, 404));
 app.use('/*', serveStatic({ root: './dist/client' }));
 app.get('*', serveStatic({ path: './dist/client/index.html' }));
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
-  console.log(`OpenDots template listening on http://${host}:${info.port}`);
+  console.log(`ACTUALLY Open Dots listening on http://${host}:${info.port}`);
   runner.start();
 });
 setInterval(() => platform.persistRuntimeHistory(), 2000).unref();

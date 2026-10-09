@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read an OpenDots owner password from stdin and print its salted scrypt hash."""
+"""Read an ACTUALLY Open Dots owner password from stdin and print its salted scrypt hash."""
 
 import hashlib
 import secrets

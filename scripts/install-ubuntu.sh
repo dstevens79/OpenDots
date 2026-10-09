@@ -15,53 +15,124 @@ if [[ ! -r /etc/os-release ]] || ! grep -q '^ID=ubuntu$' /etc/os-release || ! gr
   exit 1
 fi
 if [[ ! -f "$APP_DIR/package.json" || ! -f "$APP_DIR/package-lock.json" ]]; then
-  echo "Run this script from an OpenDots checkout." >&2
+  echo "Run this script from an ACTUALLY Open Dots checkout." >&2
   exit 1
 fi
 
-echo "This installs OpenDots and selected helpers as native Ubuntu services. No Docker containers are used."
-read -r -p "Allow access from other devices on your LAN? [Y/n] " expose_lan
-if [[ -z "$expose_lan" ]]; then
-  expose_lan="y"
+echo "This installs ACTUALLY Open Dots and selected helpers as native Ubuntu services. No Docker containers are used."
+expose_lan="y"
+want_hermes="n"
+want_opencode="n"
+want_gemini="n"
+want_codex="n"
+want_grok="n"
+install_computer="n"
+install_browser="n"
+configure_ufw="n"
+
+toggle_option() {
+  local name="$1"
+  local value="${!name}"
+  if [[ "$value" == "y" ]]; then
+    printf -v "$name" 'n'
+  else
+    printf -v "$name" 'y'
+  fi
+}
+
+show_harness_menu() {
+  while true; do
+    echo
+    echo "Machine-level Harnesses (select a number to toggle it):"
+    printf '  1) Hermes CLI: %s\n' "$([[ "$want_hermes" == "y" ]] && echo On || echo Off)"
+    printf '  2) OpenCode CLI: %s\n' "$([[ "$want_opencode" == "y" ]] && echo On || echo Off)"
+    printf '  3) Gemini CLI: %s\n' "$([[ "$want_gemini" == "y" ]] && echo On || echo Off)"
+    printf '  4) Codex CLI: %s\n' "$([[ "$want_codex" == "y" ]] && echo On || echo Off)"
+    printf '  5) Grok CLI: %s\n' "$([[ "$want_grok" == "y" ]] && echo On || echo Off)"
+    echo '  6) Select all'
+    echo '  7) Clear all'
+    echo '  0) Back to setup options'
+    read -r -p 'Harness choice: ' harness_option
+    case "$harness_option" in
+      1) toggle_option want_hermes ;;
+      2) toggle_option want_opencode ;;
+      3) toggle_option want_gemini ;;
+      4) toggle_option want_codex ;;
+      5) toggle_option want_grok ;;
+      6) want_hermes=y; want_opencode=y; want_gemini=y; want_codex=y; want_grok=y ;;
+      7) want_hermes=n; want_opencode=n; want_gemini=n; want_codex=n; want_grok=n ;;
+      0) return ;;
+      *) echo 'Choose 0-7.' ;;
+    esac
+  done
+}
+
+while true; do
+  harness_summary="None"
+  for entry in "1:Hermes:$want_hermes" "2:OpenCode:$want_opencode" "3:Gemini:$want_gemini" "4:Codex:$want_codex" "5:Grok:$want_grok"; do
+    IFS=: read -r _ number enabled <<< "$entry"
+    if [[ "$enabled" == "y" ]]; then
+      [[ "$harness_summary" == "None" ]] && harness_summary="" || harness_summary+=", "
+      harness_summary+="$number"
+    fi
+  done
+  [[ "$expose_lan" == "y" ]] && lan_summary="On (LAN)" || lan_summary="Off (this machine only)"
+  [[ "$install_computer" == "y" ]] && computer_summary="On" || computer_summary="Off"
+  [[ "$install_browser" == "y" ]] && browser_summary="On" || browser_summary="Off"
+  [[ "$configure_ufw" == "y" ]] && ufw_summary="Allow TCP 4310" || ufw_summary="No change"
+  echo
+  echo "ACTUALLY Open Dots setup options"
+  echo '  1) Network access:          '"$lan_summary"
+  echo '  2) Machine-level Harnesses: '"$harness_summary"
+  echo '  3) Local Chrome workspace:  '"$computer_summary"
+  echo '  4) Local page reader:       '"$browser_summary"
+  echo '  5) UFW firewall:            '"$ufw_summary"
+  echo '  6) Continue with install'
+  read -r -p 'Choose an option to change, or 6 to continue: ' setup_option
+  case "$setup_option" in
+    1)
+      toggle_option expose_lan
+      if [[ "$expose_lan" != "y" ]]; then configure_ufw=n; fi
+      ;;
+    2) show_harness_menu ;;
+    3) toggle_option install_computer ;;
+    4) toggle_option install_browser ;;
+    5)
+      if [[ "$expose_lan" == "y" ]]; then
+        toggle_option configure_ufw
+      else
+        echo 'UFW access is available when LAN access is enabled.'
+      fi
+      ;;
+    6) break ;;
+    *) echo 'Choose 1-6.' ;;
+  esac
+done
+
+install_manager="n"
+harness_choices=""
+[[ "$want_hermes" == "y" ]] && harness_choices+="1 "
+[[ "$want_opencode" == "y" ]] && harness_choices+="2 "
+[[ "$want_gemini" == "y" ]] && harness_choices+="3 "
+[[ "$want_codex" == "y" ]] && harness_choices+="4 "
+[[ "$want_grok" == "y" ]] && harness_choices+="5 "
+if [[ -n "$harness_choices" || "$install_computer" == "y" ]]; then
+  install_manager="y"
 fi
+
 owner_password=""
 owner_password_confirm=""
 owner_password_hash=""
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
-  read -r -s -p "Choose an OpenDots password (at least 8 characters): " owner_password
+  read -r -s -p "Choose an ACTUALLY Open Dots password (at least 8 characters): " owner_password
   echo
-  read -r -s -p "Confirm the OpenDots password: " owner_password_confirm
+  read -r -s -p "Confirm the password: " owner_password_confirm
   echo
   if [[ "${#owner_password}" -lt 8 || "$owner_password" != "$owner_password_confirm" ]]; then
     echo "Passwords must match and be at least 8 characters." >&2
     exit 1
   fi
 fi
-read -r -p "Install optional machine-level Harnesses? [y/N] " install_harnesses
-if [[ "$install_harnesses" =~ ^[Yy]$ ]]; then
-  install_manager="y"
-  echo
-  echo "Machine-level Harnesses to install:"
-  printf '  1  Hermes CLI\n  2  OpenCode CLI\n  3  Gemini CLI\n  4  Codex CLI\n  5  Grok CLI\n'
-  read -r -p 'Choose numbers separated by commas, "all", or Enter for none: ' harness_choices
-  harness_choices="$(printf '%s' "$harness_choices" | tr -d '[:space:]')"
-  if [[ "${harness_choices,,}" == "all" ]]; then
-    harness_choices="1,2,3,4,5"
-  fi
-else
-  install_manager="n"
-  harness_choices=""
-fi
-read -r -p "Install the optional per-Dot local Chrome computer workspace? [y/N] " install_computer
-if [[ "$install_computer" =~ ^[Yy]$ ]]; then
-  install_manager="y"
-fi
-read -r -p "Install the optional local public-page browser reader? [y/N] " install_browser
-configure_ufw="n"
-if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
-  read -r -p "Add a UFW allow rule for OpenDots on TCP port 4310? [y/N] " configure_ufw
-fi
-
 apt-get update
 apt-get install -y ca-certificates curl openssl python3
 if [[ "$configure_ufw" =~ ^[Yy]$ ]] && ! command -v ufw >/dev/null 2>&1; then
@@ -118,7 +189,7 @@ npm_bin="/usr/bin/npm"
 node_bin="/usr/bin/node"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=OpenDots self-hosted AI workspace
+Description=ACTUALLY Open Dots self-hosted AI workspace
 After=network-online.target
 Wants=network-online.target
 
@@ -191,9 +262,9 @@ systemctl daemon-reload
 systemctl enable opendots.service
 systemctl restart opendots.service
 if [[ "$configure_ufw" =~ ^[Yy]$ ]]; then
-  ufw allow 4310/tcp comment 'OpenDots LAN access'
+  ufw allow 4310/tcp comment 'ACTUALLY Open Dots LAN access'
   if ufw status | grep -q '^Status: active'; then
-    echo "UFW now allows TCP 4310 for OpenDots."
+    echo "UFW now allows TCP 4310 for ACTUALLY Open Dots."
   else
     echo "The UFW rule was added, but UFW is inactive; the rule will apply only if you enable UFW later."
     echo "UFW was not enabled automatically, so existing remote-access rules are unchanged."
@@ -201,11 +272,11 @@ if [[ "$configure_ufw" =~ ^[Yy]$ ]]; then
 fi
 echo
 if [[ "$expose_lan" =~ ^[Yy]$ ]]; then
-  echo "LAN access is enabled. Sign in with the OpenDots password you set during installation."
+  echo "LAN access is enabled. Sign in with the ACTUALLY Open Dots password you set during installation."
   access_ip="$(hostname -I | awk '{print $1}')"
   echo "Open http://${access_ip:-localhost}:4310 from another device on your LAN."
 else
-  echo "OpenDots is installed and running locally. Open http://localhost:4310."
+  echo "ACTUALLY Open Dots is installed and running locally. Open http://localhost:4310."
 fi
 echo "Then add a model connection in Settings."
 echo "Optional harnesses are installed from Settings → Harnesses; choose only the ones you want."
