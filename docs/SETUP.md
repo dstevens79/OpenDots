@@ -23,7 +23,7 @@ The installer defaults to LAN access (`HOST=0.0.0.0`) and asks you to choose and
 sudo systemctl restart opendots
 ```
 
-For LAN access, keep `HOST=0.0.0.0`, `OWNER_PASSWORD_HASH`, and a private `RUNTIME_TOKEN`. The native installer handles these settings. For a manual install, create the hash by entering a password into `scripts/hash-password.py` on stdin; do not put the plain password in `.env` or a shell command. The `RUNTIME_TOKEN` is for internal local agent requests and is not the login password. The app is reachable on your LAN at `http://<server-ip>:4310`; the helper services remain loopback-only and are reached through the app.
+For LAN access, keep `HOST=0.0.0.0`, `OWNER_PASSWORD_HASH`, and a private `RUNTIME_TOKEN`. The native installer handles these settings. For a manual install, create the hash by entering a password into `scripts/hash-password.py` on stdin; do not put the plain password in `.env` or a shell command. The `RUNTIME_TOKEN` is for internal local agent requests and is not the login password. The app is reachable on your LAN at `http://<server-ip>:4310`; the helper services remain loopback-only and are reached through the app. Browser microphone access requires a secure origin, so local Whisper recording works on `localhost` or an HTTPS URL, but browsers block it on this plain HTTP LAN address.
 
 ## Local computer workspace
 
@@ -55,6 +55,8 @@ ACTUALLY Open Dots keeps conversation history, scheduled task runs, computer act
 The app does not send ACTUALLY Open Dots setup or usage analytics to a hosted dashboard. CopilotKit SDK telemetry is disabled by default for self-hosted installs. Operational history needed by the app remains in the local database and can be backed up with it.
 
 Realtime voice calls use a separate compatible voice endpoint and credentials. They are optional; ordinary chat and local Whisper dictation work without them.
+
+Model turns allow five minutes by default for slower self-hosted models. Set `MODEL_TURN_TIMEOUT_MS` in `.env` to adjust the limit; accepted values range from 30 seconds to 15 minutes.
 
 ## Developer setup
 

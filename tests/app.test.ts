@@ -118,6 +118,59 @@ describe('API boundaries', () => {
     expect(tested.status).toBe(200);
     expect(await tested.json()).toMatchObject({ models: ['gemini-flash'] });
   });
+  it('sends a small chat completion to test an actual model connection', async () => {
+    const store = new Store(':memory:');
+    stores.push(store);
+    store.updateProviderConfig({
+      connections: [
+        {
+          id: 'omniroute-local',
+          name: 'OmniRoute',
+          kind: 'omniroute',
+          baseUrl: 'http://127.0.0.1:20128/v1',
+          model: 'local-model',
+          apiKey: 'local-token',
+        },
+      ],
+      residentConnectionId: 'omniroute-local',
+    });
+    const platform = {
+      store,
+      config: { ...config },
+    } as unknown as Platform;
+    const runner = new Runner(store, config);
+    const app = createApp({ store, runner, config, platform });
+    const fetchMock = vi.fn(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        expect(String(url)).toBe('http://127.0.0.1:20128/v1/chat/completions');
+        expect(new Headers(init?.headers).get('Authorization')).toBe(
+          'Bearer local-token',
+        );
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          model: 'my-active-model',
+          messages: [{ role: 'user', content: 'Reply with only: OK' }],
+          stream: false,
+        });
+        return Response.json({
+          choices: [{ message: { content: 'OK' } }],
+        });
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await app.request(
+      '/api/provider-settings/test',
+      json({
+        target: 'model',
+        connectionId: 'omniroute-local',
+        model: 'my-active-model',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      detail: 'Model replied: OK',
+    });
+  });
   it('rejects duplicate IDs in the shared connection registry', async () => {
     const store = new Store(':memory:');
     stores.push(store);

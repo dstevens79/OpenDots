@@ -30,7 +30,10 @@ const channelError = () => ({
   message:
     'ACTUALLY Open Dots could not complete this request. Please check the app and try again.',
 });
-const TURN_TIME_LIMIT_MS = 90_000;
+const configuredTurnLimit = Number(process.env.MODEL_TURN_TIMEOUT_MS);
+const TURN_TIME_LIMIT_MS = Number.isFinite(configuredTurnLimit)
+  ? Math.min(900_000, Math.max(30_000, configuredTurnLimit))
+  : 300_000;
 export class DotAgent extends AbstractAgent {
   private inner?: BuiltInAgent;
   private controller?: AbortController;
@@ -70,7 +73,7 @@ export class DotAgent extends AbstractAgent {
       }, TURN_TIME_LIMIT_MS);
       const timeLimitError = () => ({
         type: EventType.RUN_ERROR,
-        message: `This turn reached the ${TURN_TIME_LIMIT_MS / 1000} second time limit and was stopped. Try a smaller request.`,
+        message: `This turn reached the ${Math.round(TURN_TIME_LIMIT_MS / 1000)} second time limit and was stopped. Raise MODEL_TURN_TIMEOUT_MS if your local model normally needs longer.`,
       });
       try {
         const dot = this.workspace.dot(this.dotId);

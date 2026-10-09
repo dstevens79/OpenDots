@@ -41,6 +41,7 @@ import {
   localTranscriptionModel,
   transcribeAudio,
 } from './local-transcription';
+import { localMicrophoneUnavailableReason } from './microphone';
 import { createClientMessageId } from './message-id';
 
 export function Chat({
@@ -128,11 +129,9 @@ export function Chat({
       setDictating(false);
       return;
     }
-    if (
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === 'undefined'
-    ) {
-      setError('This browser does not support local microphone dictation.');
+    const microphoneError = localMicrophoneUnavailableReason();
+    if (microphoneError) {
+      setError(microphoneError);
       return;
     }
     try {
@@ -380,8 +379,8 @@ export function Chat({
             }
             title={
               voiceReady
-                ? 'Talk with your Dot'
-                : 'Voice setup requires VOICE_API_KEY and VOICE_MODEL'
+                ? 'Start a live voice call (uses the configured realtime voice provider)'
+                : 'Live calls need a realtime voice provider and chat model. For free local dictation, use the Dictate button beside the message box.'
             }
             disabled={!voiceReady || paused || !loaded || !contextReady}
             onClick={() =>
@@ -505,7 +504,7 @@ export function Chat({
                 ? 'Stop recording and transcribe locally'
                 : 'Dictate locally'
             }
-            title={`Local Whisper dictation using ${localTranscriptionModel()} (model downloads on first use)`}
+            title={`Dictate with local Whisper (${localTranscriptionModel()}); click again to transcribe into your draft`}
             disabled={
               running ||
               paused ||
@@ -561,8 +560,8 @@ export function Chat({
         <div className="chat-compose-note">
           {dictationStatus ||
             (voiceReady
-              ? 'Text and voice, one conversation.'
-              : 'Text is ready. Voice needs separate server configuration.')}
+              ? 'Use the phone icon for a live voice call; the mic beside this box uses local Whisper dictation.'
+              : 'Local Whisper dictation uses the mic beside this box. Live calls need separate voice-provider setup.')}
           {!dictationStatus && (
             <span title="Downloaded on first use and runs in this browser">
               {' '}

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { api } from './api';
 import type { Dot, Memory, State, WorkspaceState } from '../shared/types';
 import { ConnectionsSection } from './ConnectionsSection';
+import { localMicrophoneUnavailableReason } from './microphone';
 import {
   setThemePreference,
   themePreference,
@@ -130,17 +131,44 @@ export function WorkspaceDialog({
       job: { state: string; message: string } | null;
     };
   } | null>(null);
+  const [harnessStatusError, setHarnessStatusError] = useState('');
   const [whisperModel, setWhisperModel] = useState(
     () =>
       localStorage.getItem('opendots-whisper-model') ||
       'Xenova/whisper-tiny.en',
   );
   const [providerNotice, setProviderNotice] = useState('');
+  const [modelTestBusy, setModelTestBusy] = useState(false);
   const [whisperRecording, setWhisperRecording] = useState(false);
   const [whisperProcessing, setWhisperProcessing] = useState(false);
   const [whisperTranscript, setWhisperTranscript] = useState('');
   const whisperRecorder = useRef<MediaRecorder | undefined>(undefined);
   const whisperStream = useRef<MediaStream | undefined>(undefined);
+  const harnessRequestPending = useRef(false);
+  const refreshHarnessStatus = useCallback(() => {
+    if (harnessRequestPending.current) return;
+    harnessRequestPending.current = true;
+    void api<typeof harnesses>('/local-harnesses')
+      .then((status) => {
+        setHarnesses(status);
+        setHarnessStatusError('');
+      })
+      .catch((reason: unknown) =>
+        setHarnessStatusError(
+          reason instanceof Error
+            ? reason.message
+            : 'Host status is unavailable; retrying.',
+        ),
+      )
+      .finally(() => {
+        harnessRequestPending.current = false;
+      });
+  }, []);
+  const harnessRefreshNeeded =
+    !harnesses ||
+    Object.values(harnesses).some((item) =>
+      ['installing', 'authenticating'].includes(item.job?.state ?? ''),
+    );
   useEffect(() => {
     if (dialog.type !== 'settings') return;
     void api<typeof provider>('/provider-settings')
@@ -170,26 +198,15 @@ export function WorkspaceDialog({
   }, [dialog.type]);
   useEffect(() => {
     if (dialog.type !== 'settings') return;
-    const refresh = () =>
-      void api<typeof harnesses>('/local-harnesses')
-        .then(setHarnesses)
-        .catch(() => setProviderNotice('Could not check local harnesses.'));
-    refresh();
+    refreshHarnessStatus();
     const timer = window.setInterval(() => {
-      if (
-        harnesses?.hermes.job?.state === 'installing' ||
-        harnesses?.opencode.job?.state === 'installing' ||
-        harnesses?.gemini.job?.state === 'installing' ||
-        harnesses?.codex.job?.state === 'installing' ||
-        harnesses?.grok.job?.state === 'installing' ||
-        harnesses?.codex.job?.state === 'authenticating' ||
-        harnesses?.grok.job?.state === 'authenticating'
-      )
-        refresh();
-    }, 2500);
+      if (harnessRefreshNeeded) refreshHarnessStatus();
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [
     dialog.type,
+    harnessRefreshNeeded,
+    refreshHarnessStatus,
     harnesses?.hermes.job?.state,
     harnesses?.opencode.job?.state,
     harnesses?.gemini.job?.state,
@@ -365,11 +382,9 @@ export function WorkspaceDialog({
       setWhisperRecording(false);
       return;
     }
-    if (
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === 'undefined'
-    ) {
-      setProviderNotice('This browser does not support microphone recording.');
+    const microphoneError = localMicrophoneUnavailableReason();
+    if (microphoneError) {
+      setProviderNotice(microphoneError);
       return;
     }
     try {
@@ -664,7 +679,7 @@ export function WorkspaceDialog({
               </select>
             </fieldset>
           )}
-          {(dialog.type === 'dot' || dialog.type === 'settings') && (
+          {dialog.type === 'dot' && (
             <>
               <label className="permission-row">
                 <input
@@ -928,7 +943,6 @@ export function WorkspaceDialog({
                   <button
                     type="button"
                     className="secondary"
-                    disabled={whisperProcessing}
                     onClick={async () => {
                       if (!selectedConnection?.baseUrl) {
                         setProviderNotice(
@@ -960,6 +974,68 @@ export function WorkspaceDialog({
                   >
                     Test selected connection
                   </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!selectedConnection || modelTestBusy}
+                    onClick={async () => {
+                      if (!selectedConnection) return;
+                      const model =
+                        selectedConnection.id === provider.residentConnectionId
+                          ? provider.model || selectedConnection.model
+                          : selectedConnection.id ===
+                              provider.housekeepingConnectionId
+                            ? provider.housekeepingModel ||
+                              selectedConnection.model
+                            : selectedConnection.model;
+                      setModelTestBusy(true);
+                      setProviderNotice(
+                        `Sending a short test prompt to ${model}…`,
+                      );
+                      try {
+                        const response = await fetch(
+                          '/api/provider-settings/test',
+                          {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                              target: 'model',
+                              connectionId: selectedConnection.id,
+                              model,
+                              apiKey: selectedConnection.apiKey,
+                            }),
+                            signal: AbortSignal.timeout(130_000),
+                          },
+                        );
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.error);
+                        setProviderNotice(
+                          result.detail || 'Model test succeeded.',
+                        );
+                      } catch (reason) {
+                        setProviderNotice(
+                          reason instanceof Error &&
+                            reason.name === 'TimeoutError'
+                            ? 'The model test took over 130 seconds. The request may still be running at the provider.'
+                            : reason instanceof Error
+                              ? reason.message
+                              : 'Model test failed.',
+                        );
+                      } finally {
+                        setModelTestBusy(false);
+                      }
+                    }}
+                  >
+                    {modelTestBusy
+                      ? 'Waiting for model…'
+                      : 'Send a model test prompt'}
+                  </button>
+                  <p className="muted">
+                    Sends “Reply with only: OK” to the selected model so you can
+                    verify a real response, not just endpoint reachability.
+                  </p>
                   {providerNotice && (
                     <p className="muted" role="status">
                       {providerNotice}
@@ -1151,11 +1227,23 @@ export function WorkspaceDialog({
               )}
               {mainTab === 'harnesses' && (
                 <>
+                  {harnessStatusError && (
+                    <p className="chat-error" role="alert">
+                      Could not read host harness status: {harnessStatusError}
+                    </p>
+                  )}
                   <p className="muted">
                     Install and check machine-level agent harnesses here. Their
                     model access is configured separately under Connections and
                     Model roles.
                   </p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={refreshHarnessStatus}
+                  >
+                    Refresh harness status
+                  </button>
                   <>
                     <>
                       <label className="field-label">
@@ -1230,21 +1318,28 @@ export function WorkspaceDialog({
                   <fieldset className="appearance-fields">
                     <legend>Hermes agent API</legend>
                     <p className="muted">
-                      {harnesses?.hermes.job?.message ||
-                        (harnesses?.hermes.running
-                          ? 'Running'
-                          : harnesses?.hermes.installed
-                            ? 'Installed; start it by saving settings or clicking Test.'
-                            : 'Not installed')}
+                      {!harnesses
+                        ? 'Checking machine installation status…'
+                        : harnesses.hermes.job?.message ||
+                          (harnesses?.hermes.running
+                            ? 'Running'
+                            : harnesses?.hermes.installed
+                              ? 'Installed; start it by saving settings or clicking Test.'
+                              : 'Not installed')}
                     </p>
                     {!harnesses?.hermes.installed ? (
                       <button
                         type="button"
                         className="secondary"
-                        disabled={harnesses?.hermes.job?.state === 'installing'}
+                        disabled={
+                          !harnesses ||
+                          harnesses.hermes.job?.state === 'installing'
+                        }
                         onClick={() => void installHarness('hermes')}
                       >
-                        Install and set up Hermes
+                        {harnesses
+                          ? 'Install and set up Hermes'
+                          : 'Checking status…'}
                       </button>
                     ) : (
                       <>
@@ -1270,23 +1365,28 @@ export function WorkspaceDialog({
                   <fieldset className="appearance-fields">
                     <legend>OpenCode task harness</legend>
                     <p className="muted">
-                      {harnesses?.opencode.job?.message ||
-                        (harnesses?.opencode.running
-                          ? `Running at ${harnesses.opencode.url}`
-                          : harnesses?.opencode.installed
-                            ? 'Installed; not running'
-                            : 'Not installed')}
+                      {!harnesses
+                        ? 'Checking machine installation status…'
+                        : harnesses.opencode.job?.message ||
+                          (harnesses?.opencode.running
+                            ? `Running at ${harnesses.opencode.url}`
+                            : harnesses?.opencode.installed
+                              ? 'Installed; not running'
+                              : 'Not installed')}
                     </p>
                     {!harnesses?.opencode.installed ? (
                       <button
                         type="button"
                         className="secondary"
                         disabled={
-                          harnesses?.opencode.job?.state === 'installing'
+                          !harnesses ||
+                          harnesses.opencode.job?.state === 'installing'
                         }
                         onClick={() => void installHarness('opencode')}
                       >
-                        Install and set up OpenCode
+                        {harnesses
+                          ? 'Install and set up OpenCode'
+                          : 'Checking status…'}
                       </button>
                     ) : (
                       <>
@@ -1334,19 +1434,25 @@ export function WorkspaceDialog({
                         <legend>{label}</legend>
                         <p className="muted">{description}</p>
                         <p className="muted">
-                          {harness?.job?.message ||
-                            (harness?.installed
-                              ? 'Installed. Run its sign-in flow on the host before using it.'
-                              : 'Not installed')}
+                          {!harnesses
+                            ? 'Checking machine installation status…'
+                            : harness?.job?.message ||
+                              (harness?.installed
+                                ? 'Installed. Run its sign-in flow on the host before using it.'
+                                : 'Not installed')}
                         </p>
                         {!harness?.installed ? (
                           <button
                             type="button"
                             className="secondary"
-                            disabled={harness?.job?.state === 'installing'}
+                            disabled={
+                              !harnesses || harness?.job?.state === 'installing'
+                            }
                             onClick={() => void installHarness(name)}
                           >
-                            Install {label}
+                            {harnesses
+                              ? `Install ${label}`
+                              : 'Checking status…'}
                           </button>
                         ) : (
                           <>
@@ -1385,176 +1491,222 @@ export function WorkspaceDialog({
               )}
               {mainTab === 'voice' && (
                 <>
-                  <strong>Local dictation</strong>
-                  <p className="muted">
-                    Whisper runs in this browser and inserts recognized text
-                    into chat. The model downloads on first use and stays cached
-                    by the browser.
-                  </p>
-                  <label className="field-label">
-                    Whisper model
-                    <select
-                      value={whisperModel}
-                      onChange={(e) => setWhisperModel(e.target.value)}
-                    >
-                      <option value="Xenova/whisper-tiny.en">
-                        Whisper Tiny English (fastest)
-                      </option>
-                      <option value="Xenova/whisper-base.en">
-                        Whisper Base English
-                      </option>
-                      <option value="Xenova/whisper-small.en">
-                        Whisper Small English (more accurate, larger download)
-                      </option>
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => {
-                      localStorage.setItem(
-                        'opendots-whisper-model',
-                        whisperModel,
-                      );
-                      void toggleWhisperTest();
-                    }}
-                  >
-                    {whisperRecording
-                      ? 'Stop and transcribe'
-                      : 'Record a Whisper test'}
-                  </button>
-                  {whisperTranscript && (
-                    <div className="muted" role="status">
-                      <strong>Recognized text:</strong> {whisperTranscript}
-                    </div>
-                  )}
-                  <p className="muted">
-                    In any chat, use the microphone button beside the message
-                    box. It records a short clip and inserts Whisper’s
-                    transcript into your draft; nothing is sent until you press
-                    Send.
-                  </p>
-                  <strong>Live voice calls</strong>
-                  <p className="muted">
-                    Live speech-to-speech uses its own realtime endpoint and
-                    model, separate from chat and local Whisper dictation.
-                  </p>
-                  <label className="field-label">
-                    Realtime voice endpoint
-                    <input
-                      value={provider.voiceBaseUrl}
-                      placeholder="https://api.openai.com/v1"
-                      onChange={(e) =>
-                        setProvider({
-                          ...provider,
-                          voiceBaseUrl: e.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="field-label">
-                    Realtime voice model
-                    <select
-                      value={provider.voiceModel}
-                      onChange={(e) =>
-                        setProvider({ ...provider, voiceModel: e.target.value })
-                      }
-                    >
-                      {!voiceModelChoices.length && provider.voiceModel && (
-                        <option value={provider.voiceModel}>
-                          {provider.voiceModel} (saved)
+                  <fieldset className="appearance-fields voice-settings-group">
+                    <legend>Local dictation (Whisper)</legend>
+                    <p className="muted">
+                      Whisper runs in this browser and inserts recognized text
+                      into chat. The model downloads on first use and stays
+                      cached by the browser.
+                    </p>
+                    <label className="field-label">
+                      Whisper model
+                      <select
+                        value={whisperModel}
+                        onChange={(e) => setWhisperModel(e.target.value)}
+                      >
+                        <option value="Xenova/whisper-tiny.en">
+                          Whisper Tiny English (fastest)
                         </option>
-                      )}
-                      {voiceModelChoices.map((model) => (
-                        <option key={model} value={model}>
-                          {model}
+                        <option value="Xenova/whisper-base.en">
+                          Whisper Base English
                         </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={async () => {
-                      setProviderNotice('Loading voice models…');
-                      try {
-                        const response = await fetch(
-                          '/api/provider-settings/test',
-                          {
-                            method: 'POST',
-                            headers: {
-                              'Content-Type': 'application/json',
+                        <option value="Xenova/whisper-small.en">
+                          Whisper Small English (more accurate, larger download)
+                        </option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={whisperProcessing}
+                      onClick={() => {
+                        localStorage.setItem(
+                          'opendots-whisper-model',
+                          whisperModel,
+                        );
+                        void toggleWhisperTest();
+                      }}
+                    >
+                      {whisperRecording
+                        ? 'Stop and transcribe'
+                        : 'Record a Whisper test'}
+                    </button>
+                    {whisperTranscript && (
+                      <div className="muted" role="status">
+                        <strong>Recognized text:</strong> {whisperTranscript}
+                      </div>
+                    )}
+                    <p className="muted">
+                      In any chat, use the microphone button beside the message
+                      box. It records a short clip and inserts Whisper’s
+                      transcript into your draft; nothing is sent until you
+                      press Send.
+                    </p>
+                    {!globalThis.isSecureContext && (
+                      <p className="chat-error" role="status">
+                        Browser microphone access needs HTTPS or localhost. This
+                        page is not being treated as secure, so Whisper cannot
+                        record until you open a secure URL.
+                      </p>
+                    )}
+                  </fieldset>
+                  <fieldset className="appearance-fields voice-settings-group">
+                    <legend>Live voice calls</legend>
+                    <p className="muted">
+                      Live speech-to-speech uses its own realtime endpoint and
+                      model, separate from chat and local Whisper dictation.
+                    </p>
+                    <label className="field-label">
+                      Realtime voice endpoint
+                      <input
+                        value={provider.voiceBaseUrl}
+                        placeholder="https://api.openai.com/v1"
+                        onChange={(e) =>
+                          setProvider({
+                            ...provider,
+                            voiceBaseUrl: e.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="field-label">
+                      Realtime voice model
+                      <select
+                        value={provider.voiceModel}
+                        onChange={(e) =>
+                          setProvider({
+                            ...provider,
+                            voiceModel: e.target.value,
+                          })
+                        }
+                      >
+                        {!voiceModelChoices.length && provider.voiceModel && (
+                          <option value={provider.voiceModel}>
+                            {provider.voiceModel} (saved)
+                          </option>
+                        )}
+                        {voiceModelChoices.map((model) => (
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={async () => {
+                        setProviderNotice('Loading voice models…');
+                        try {
+                          const response = await fetch(
+                            '/api/provider-settings/test',
+                            {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                target: 'voice',
+                                voiceBaseUrl: provider.voiceBaseUrl,
+                                voiceKey: provider.voiceKey,
+                              }),
                             },
-                            body: JSON.stringify({
-                              target: 'voice',
-                              voiceBaseUrl: provider.voiceBaseUrl,
-                              voiceKey: provider.voiceKey,
-                            }),
-                          },
-                        );
-                        const result = await response.json();
-                        if (!response.ok) throw new Error(result.error);
-                        setVoiceModelChoices(result.models || []);
-                        setProviderNotice(
-                          result.models?.length
-                            ? `${result.models.length} voice endpoint models found.`
-                            : 'Voice endpoint did not list models.',
-                        );
-                      } catch (error) {
-                        setProviderNotice(
-                          error instanceof Error
-                            ? error.message
-                            : 'Could not load voice models.',
-                        );
-                      }
-                    }}
-                  >
-                    Load voice models
-                  </button>
-                  <label className="field-label">
-                    Voice API key{' '}
-                    {provider.hasVoiceKey && !provider.voiceKey
-                      ? '(saved; leave blank to keep)'
-                      : ''}
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={provider.voiceKey}
-                      onChange={(e) =>
-                        setProvider({ ...provider, voiceKey: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field-label">
-                    Spoken voice
-                    <select
-                      value={provider.voiceName}
-                      onChange={(e) =>
-                        setProvider({ ...provider, voiceName: e.target.value })
-                      }
+                          );
+                          const result = await response.json();
+                          if (!response.ok) throw new Error(result.error);
+                          setVoiceModelChoices(result.models || []);
+                          setProviderNotice(
+                            result.models?.length
+                              ? `${result.models.length} voice endpoint models found.`
+                              : 'Voice endpoint did not list models.',
+                          );
+                        } catch (error) {
+                          setProviderNotice(
+                            error instanceof Error
+                              ? error.message
+                              : 'Could not load voice models.',
+                          );
+                        }
+                      }}
                     >
-                      {[
-                        'alloy',
-                        'ash',
-                        'ballad',
-                        'cedar',
-                        'coral',
-                        'echo',
-                        'marin',
-                        'sage',
-                        'shimmer',
-                        'verse',
-                      ].map((voice) => (
-                        <option key={voice} value={voice}>
-                          {voice[0].toUpperCase() + voice.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      Load voice models
+                    </button>
+                    <label className="field-label">
+                      Voice API key{' '}
+                      {provider.hasVoiceKey && !provider.voiceKey
+                        ? '(saved; leave blank to keep)'
+                        : ''}
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={provider.voiceKey}
+                        onChange={(e) =>
+                          setProvider({ ...provider, voiceKey: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="field-label">
+                      Spoken voice
+                      <select
+                        value={provider.voiceName}
+                        onChange={(e) =>
+                          setProvider({
+                            ...provider,
+                            voiceName: e.target.value,
+                          })
+                        }
+                      >
+                        {[
+                          'alloy',
+                          'ash',
+                          'ballad',
+                          'cedar',
+                          'coral',
+                          'echo',
+                          'marin',
+                          'sage',
+                          'shimmer',
+                          'verse',
+                        ].map((voice) => (
+                          <option key={voice} value={voice}>
+                            {voice[0].toUpperCase() + voice.slice(1)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </fieldset>
                 </>
               )}
               {mainTab === 'general' && (
                 <>
+                  <label className="permission-row">
+                    <input
+                      type="checkbox"
+                      checked={research}
+                      onChange={(e) => setResearch(e.target.checked)}
+                    />
+                    <span>
+                      <strong>Public-page research</strong>
+                      <small>
+                        Allow the server-side read-only browser tool. This
+                        setting applies to all Dots.
+                      </small>
+                    </span>
+                  </label>
+                  <label className="permission-row">
+                    <input
+                      type="checkbox"
+                      checked={memory}
+                      onChange={(e) => setMemory(e.target.checked)}
+                    />
+                    <span>
+                      <strong>Use saved memories</strong>
+                      <small>
+                        Include saved preferences in new turns. Changing this
+                        stops active work.
+                      </small>
+                    </span>
+                  </label>
                   <fieldset className="appearance-fields">
                     <legend>Appearance</legend>
                     <div className="segmented" role="radiogroup">

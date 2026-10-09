@@ -4034,6 +4034,16 @@ h3 {
   margin: 18px 0 0;
   padding: 0;
 }
+.voice-settings-group {
+  width: 100%;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.voice-settings-group:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
 .settings-tabs {
   display: flex;
   gap: 6px;

@@ -56,6 +56,7 @@ export function createApp({
   const requestHarnessManager = async <T extends Record<string, unknown>>(
     path: string,
     body?: unknown,
+    timeoutMs = 35_000,
   ): Promise<T> => {
     if (!managerUrl || !managerToken)
       throw new Error('Host harness service is not configured.');
@@ -66,7 +67,7 @@ export function createApp({
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(35_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const result = (await response.json().catch(() => ({}))) as T & {
       error?: string;
@@ -385,7 +386,7 @@ export function createApp({
       try {
         const credentials = await requestHarnessManager<{
           hermesKey?: string;
-        }>('/credentials');
+        }>('/credentials', undefined, 8_000);
         const configured = current.connections.map((connection) =>
           connection.kind === 'hermes' &&
           !connection.apiKey &&
@@ -624,9 +625,17 @@ export function createApp({
     const request = z
       .object({
         target: z
-          .enum(['chat', 'connection', 'housekeeping', 'voice', 'opencode'])
+          .enum([
+            'chat',
+            'connection',
+            'model',
+            'housekeeping',
+            'voice',
+            'opencode',
+          ])
           .default('chat'),
         connectionId: z.string().optional(),
+        model: z.string().trim().max(256).optional(),
         baseUrl: z.string().optional(),
         apiKey: z.string().optional(),
         openCodeUrl: z.string().optional(),
@@ -650,7 +659,8 @@ export function createApp({
     const url =
       request.data.target === 'opencode'
         ? (request.data.openCodeUrl ?? provider.openCodeUrl)
-        : request.data.target === 'connection'
+        : request.data.target === 'connection' ||
+            request.data.target === 'model'
           ? (selectedConnection?.baseUrl ?? '')
           : request.data.target === 'housekeeping'
             ? (request.data.housekeepingBaseUrl ?? provider.housekeepingBaseUrl)
@@ -660,8 +670,9 @@ export function createApp({
     const authKey =
       request.data.target === 'opencode'
         ? request.data.openCodePassword?.trim() || provider.openCodePassword
-        : request.data.target === 'connection'
-          ? selectedConnection?.apiKey
+        : request.data.target === 'connection' ||
+            request.data.target === 'model'
+          ? request.data.apiKey?.trim() || selectedConnection?.apiKey
           : request.data.target === 'housekeeping'
             ? request.data.housekeepingApiKey?.trim() ||
               provider.housekeepingApiKey ||
@@ -673,20 +684,39 @@ export function createApp({
     const resolvedAuthKey = authKey;
     try {
       const base = url.replace(/\/$/, '');
+      const isModelTest = request.data.target === 'model';
       const response = await fetch(
         request.data.target === 'opencode'
           ? `${base}/global/health`
-          : `${base}/models`,
+          : isModelTest
+            ? `${base}/chat/completions`
+            : `${base}/models`,
         {
+          method: isModelTest ? 'POST' : 'GET',
           headers:
             request.data.target === 'opencode' && resolvedAuthKey
               ? {
                   Authorization: `Basic ${Buffer.from(`opencode:${resolvedAuthKey}`).toString('base64')}`,
                 }
-              : resolvedAuthKey
-                ? { Authorization: `Bearer ${resolvedAuthKey}` }
-                : {},
-          signal: AbortSignal.timeout(8000),
+              : {
+                  ...(resolvedAuthKey
+                    ? { Authorization: `Bearer ${resolvedAuthKey}` }
+                    : {}),
+                  ...(isModelTest
+                    ? { 'Content-Type': 'application/json' }
+                    : {}),
+                },
+          ...(isModelTest
+            ? {
+                body: JSON.stringify({
+                  model: request.data.model || selectedConnection?.model,
+                  messages: [{ role: 'user', content: 'Reply with only: OK' }],
+                  max_tokens: 16,
+                  stream: false,
+                }),
+              }
+            : {}),
+          signal: AbortSignal.timeout(isModelTest ? 120_000 : 30_000),
         },
       );
       if (!response.ok)
@@ -697,7 +727,18 @@ export function createApp({
       const data = (await response.json().catch(() => null)) as {
         data?: { id?: unknown }[];
         healthy?: boolean;
+        choices?: { message?: { content?: unknown } }[];
       } | null;
+      if (isModelTest) {
+        const content = data?.choices?.[0]?.message?.content;
+        return c.json({
+          ok: true,
+          detail:
+            typeof content === 'string' && content.trim()
+              ? `Model replied: ${content.trim().slice(0, 200)}`
+              : 'The endpoint answered the model request.',
+        });
+      }
       const models = Array.isArray(data?.data)
         ? data.data
             .map((entry) => entry.id)
@@ -713,7 +754,17 @@ export function createApp({
               ? `Connected; ${data.data.length} model(s) listed.`
               : 'Endpoint is reachable.',
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError')
+        return c.json(
+          {
+            error:
+              request.data.target === 'model'
+                ? 'The model took over 120 seconds to answer. Check OmniRoute and its backend model; increase MODEL_TURN_TIMEOUT_MS if normal local inference takes longer.'
+                : 'The endpoint took over 30 seconds to answer its check. Verify the OmniRoute host and model provider are running, then try again.',
+          },
+          504,
+        );
       return c.json(
         {
           error:
@@ -725,12 +776,15 @@ export function createApp({
   });
   app.get('/api/local-harnesses', async (c) => {
     try {
-      const status =
-        await requestHarnessManager<Record<string, unknown>>('/status');
+      const status = await requestHarnessManager<Record<string, unknown>>(
+        '/status',
+        undefined,
+        8_000,
+      );
       const credentials = await requestHarnessManager<{
         hermesKey?: string;
         openCodePassword?: string;
-      }>('/credentials');
+      }>('/credentials', undefined, 8_000);
       const current = store.providerConfig();
       const hermesUrl =
         process.env.HERMES_PUBLIC_URL || 'http://127.0.0.1:8642/v1';
