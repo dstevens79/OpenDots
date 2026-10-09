@@ -355,10 +355,10 @@ export class DotAgent extends AbstractAgent {
                       }));
                   },
                 }),
-                ...(['codex', 'grok'] as const).map((harness) =>
+                ...(['hermes', 'codex', 'grok'] as const).map((harness) =>
                   defineTool({
                     name: `delegate_to_${harness}`,
-                    description: `Delegate an owner-requested coding or file task to the installed ${harness === 'codex' ? 'OpenAI Codex' : 'xAI Grok Build'} CLI. It runs in this Dot's isolated, persistent harness workspace on the ACTUALLY Open Dots machine. Use only when a task benefits from coding-agent tools; report the harness result and workspace path.`,
+                    description: `Send an owner-requested task or explicit harness test to the installed ${harness === 'hermes' ? 'Hermes Agent' : harness === 'codex' ? 'OpenAI Codex CLI' : 'xAI Grok Build CLI'}. It runs in this Dot's isolated, persistent harness workspace on the ACTUALLY Open Dots machine. Report the harness result and workspace path.`,
                     parameters: z.object({
                       task: z.string().trim().min(1).max(12000),
                     }),
@@ -393,7 +393,7 @@ export class DotAgent extends AbstractAgent {
                           startResult.error ||
                             `${harness} could not start a task (HTTP ${started.status}).`,
                         );
-                      const deadline = Date.now() + 72_000;
+                      const deadline = Date.now() + 85_000;
                       while (Date.now() < deadline) {
                         check();
                         await new Promise((resolve) =>
@@ -427,7 +427,7 @@ export class DotAgent extends AbstractAgent {
                           throw new Error(`${harness} task status expired.`);
                       }
                       throw new Error(
-                        `${harness} is still working after 72 seconds; the task can be checked again later.`,
+                        `${harness} is still working after 85 seconds; the task can be checked again later.`,
                       );
                     },
                   }),
@@ -516,7 +516,7 @@ export class DotAgent extends AbstractAgent {
             ? 'A server-managed OpenCode harness is configured for delegated coding and workspace tasks; use it through its provided tools when appropriate, and report only results returned by the harness.'
             : '',
           this.config.harnessManagerUrl && this.config.harnessManagerToken
-            ? 'Use list_local_harnesses to check installed and running machine tools. Codex and Grok Build have delegation tools and require sign-in; each task uses a separate persistent workspace per Dot. OpenCode has a delegation tool when its server connection is configured. Hermes and Gemini are used through saved provider connections; never reuse Google-account Gemini CLI OAuth through ACTUALLY Open Dots.'
+            ? 'Use list_local_harnesses to check installed and running machine tools. Hermes, Codex, and Grok Build have delegation tools; Hermes needs a working model/provider connection, and Codex and Grok Build need sign-in. Each delegated task uses a separate persistent workspace per Dot. OpenCode has a delegation tool when its server connection is configured. Hermes can also be selected as a saved model connection. Gemini is used through saved provider connections; never reuse Google-account Gemini CLI OAuth through ACTUALLY Open Dots.'
             : '',
         ]
           .filter(Boolean)
