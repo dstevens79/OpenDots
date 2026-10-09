@@ -482,7 +482,7 @@ class Handler(BaseHTTPRequestHandler):
             method, route, api_path, data = "POST", "api", "computers/stop", {}
         elif route == "health":
             api_path = "health"
-        allowed = {"health", "control", "control/request", "control/take", "control/release", "navigate", "read", "screenshot", "snapshot", "click", "type", "key", "scroll", "human/click", "human/type", "human/key", "human/scroll", "files/list", "files/read", "files/write", "files/download", "computers/stop"}
+        allowed = {"health", "control", "control/request", "control/take", "control/release", "navigate", "read", "screenshot", "snapshot", "click", "type", "key", "scroll", "human/click", "human/type", "human/key", "human/scroll", "files/list", "files/read", "files/write", "files/download", "exec", "computers/stop"}
         api_path = unquote(api_path or "")
         if api_path not in allowed or ".." in api_path or "?" in api_path or "#" in api_path:
             return self.reply(404, {"error": "Computer route is not available"})
