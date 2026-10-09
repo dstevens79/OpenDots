@@ -40,7 +40,14 @@ fi
 read -r -p "Install optional machine-level Harnesses? [y/N] " install_harnesses
 if [[ "$install_harnesses" =~ ^[Yy]$ ]]; then
   install_manager="y"
-  read -r -p "Which harnesses should be installed now? 1 Hermes, 2 OpenCode, 3 Gemini CLI, 4 Codex CLI, 5 Grok CLI (comma-separated, blank for none): " harness_choices
+  echo
+  echo "Machine-level Harnesses to install:"
+  printf '  1  Hermes CLI\n  2  OpenCode CLI\n  3  Gemini CLI\n  4  Codex CLI\n  5  Grok CLI\n'
+  read -r -p 'Choose numbers separated by commas, "all", or Enter for none: ' harness_choices
+  harness_choices="$(printf '%s' "$harness_choices" | tr -d '[:space:]')"
+  if [[ "${harness_choices,,}" == "all" ]]; then
+    harness_choices="1,2,3,4,5"
+  fi
 else
   install_manager="n"
   harness_choices=""
@@ -136,6 +143,24 @@ EOF
 if [[ "$install_manager" =~ ^[Yy]$ ]]; then
   HARNESS_MANAGER_HOST=127.0.0.1 bash "$APP_DIR/deployment/install-host-harness-manager.sh" "$APP_DIR"
   manager_token="$(sed -n 's/^HARNESS_MANAGER_TOKEN=//p' "$APP_DIR/.env")"
+  if [[ -n "$harness_choices" ]]; then
+    echo
+    echo "Waiting for the local Harness manager to become ready..."
+    manager_ready="n"
+    for _ in {1..30}; do
+      if curl --silent --output /dev/null --max-time 2 http://127.0.0.1:4312/status; then
+        manager_ready="y"
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$manager_ready" != "y" ]]; then
+      echo "The Harness manager did not start listening on 127.0.0.1:4312 within 30 seconds." >&2
+      echo "Check it with: sudo systemctl status opendots-harness-manager" >&2
+      journalctl -u opendots-harness-manager -n 30 --no-pager >&2 || true
+      exit 1
+    fi
+  fi
   for choice in ${harness_choices//,/ }; do
     case "$choice" in
       1) harness="hermes" ;;
@@ -143,14 +168,17 @@ if [[ "$install_manager" =~ ^[Yy]$ ]]; then
       3) harness="gemini" ;;
       4) harness="codex" ;;
       5) harness="grok" ;;
-      *) echo "Skipping unknown harness choice: $choice"; continue ;;
+      *) echo "Unknown harness choice: $choice. Choose 1-5, all, or leave blank." >&2; exit 1 ;;
     esac
     curl -fsS -X POST http://127.0.0.1:4312/install \
       -H "Authorization: Bearer $manager_token" \
       -H 'Content-Type: application/json' \
       --data "{\"harness\":\"$harness\"}" >/dev/null
-    echo "Started optional $harness installation."
+    echo "Queued $harness installation."
   done
+  if [[ -n "$harness_choices" ]]; then
+    echo "Selected Harnesses will finish installing in the background. Check Settings → Harnesses for their status."
+  fi
 fi
 if [[ "$install_computer" =~ ^[Yy]$ ]]; then
   bash "$APP_DIR/deployment/install-local-computer.sh" "$APP_DIR"
