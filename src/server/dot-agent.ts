@@ -25,7 +25,10 @@ import type { PlatformConfig } from './platform-config.js';
 import { browserResponse } from './research.js';
 import { isScheduledTaskMessage } from '../shared/scheduled-message.js';
 import { providerForTurn } from './model-role.js';
-import { canonicalToolCallArgumentStream } from './canonical-tool-call-stream.js';
+import {
+  canonicalToolCallArgumentStream,
+  sanitizeToolCallHistory,
+} from './canonical-tool-call-stream.js';
 const channelError = () => ({
   type: EventType.RUN_ERROR,
   message:
@@ -536,7 +539,7 @@ export class DotAgent extends AbstractAgent {
             return canonicalToolCallArgumentStream(
               chat({
                 adapter,
-                messages: converted.messages,
+                messages: sanitizeToolCallHistory(converted.messages),
                 systemPrompts: [prompt, ...converted.systemPrompts],
                 abortController: ctx.abortController,
                 threadId: ctx.input.threadId,

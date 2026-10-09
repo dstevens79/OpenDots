@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest';
 import { EventType, type StreamChunk } from '@tanstack/ai';
-import { canonicalToolCallArgumentStream } from '../src/server/canonical-tool-call-stream.js';
+import {
+  canonicalToolCallArgumentStream,
+  sanitizeToolCallHistory,
+} from '../src/server/canonical-tool-call-stream.js';
 
 async function collect(stream: AsyncIterable<StreamChunk>) {
   const chunks: StreamChunk[] = [];
@@ -12,6 +15,44 @@ async function collect(stream: AsyncIterable<StreamChunk>) {
 async function* chunks(...items: StreamChunk[]) {
   yield* items;
 }
+
+it('repairs malformed historical assistant arguments and preserves the rest of the turn', () => {
+  const messages = [
+    {
+      role: 'assistant',
+      toolCalls: [
+        {
+          id: 'broken-call',
+          function: { name: 'computer_snapshot', arguments: '{}{}' },
+        },
+        {
+          id: 'valid-call',
+          function: { name: 'read_page', arguments: '{"path":"notes"}' },
+        },
+      ],
+    },
+    { role: 'tool', toolCallId: 'broken-call', content: 'Snapshot result' },
+    { role: 'user', content: 'Continue' },
+  ];
+
+  expect(sanitizeToolCallHistory(messages)).toEqual([
+    {
+      role: 'assistant',
+      toolCalls: [
+        {
+          id: 'broken-call',
+          function: { name: 'computer_snapshot', arguments: '{}' },
+        },
+        {
+          id: 'valid-call',
+          function: { name: 'read_page', arguments: '{"path":"notes"}' },
+        },
+      ],
+    },
+    { role: 'tool', toolCallId: 'broken-call', content: 'Snapshot result' },
+    { role: 'user', content: 'Continue' },
+  ]);
+});
 
 it('replaces fragmented or duplicated arguments with TanStack parsed input', async () => {
   const result = await collect(
