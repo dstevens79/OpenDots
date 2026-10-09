@@ -346,7 +346,7 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                   <p className="computer-screen-empty">
                     {running
                       ? 'Waiting for the browser screen…'
-                      : 'Start the computer with Browser permission to see its screen.'}
+                      : 'Opening this panel starts the computer. If it remains stopped, refresh to retry.'}
                   </p>
                 )}
                 <div className="computer-control-pill">

@@ -5,6 +5,7 @@ APP_DIR="${1:-/opt/opendots}"
 OPENBOT_DIR="/opt/opendots-local-computer"
 DATA_DIR="/var/lib/opendots-computers"
 ENV_FILE="/etc/opendots-harness-manager.env"
+COMPUTER_ENV_FILE="/etc/opendots-local-computer.env"
 SERVICE_FILE="/etc/systemd/system/opendots-local-computer.service"
 OPENBOT_COMMIT="aff4981e0734f15ff2fc68c86a32f765e0cae2b2"
 
@@ -39,8 +40,9 @@ cd "$OPENBOT_DIR"
 bun install --frozen-lockfile
 bun install --cwd agent-computer --frozen-lockfile
 
-install -d -o opendots-harness -g opendots-harness -m 0700 "$DATA_DIR"
-install -d -o opendots-harness -g opendots-harness -m 0700 "$DATA_DIR/home"
+id opendots-computer >/dev/null 2>&1 || useradd --system --home-dir "$DATA_DIR" --create-home --shell /usr/sbin/nologin opendots-computer
+chown -R opendots-computer:opendots-computer "$DATA_DIR"
+install -d -o opendots-computer -g opendots-computer -m 0700 "$DATA_DIR" "$DATA_DIR/home"
 computer_token="$(sed -n 's/^LOCAL_COMPUTER_TOKEN=//p' "$ENV_FILE")"
 if [[ -z "$computer_token" ]]; then
   computer_token="$(openssl rand -hex 32)"
@@ -50,6 +52,9 @@ sed -i '/^COMPUTER_TOKEN=/d' "$ENV_FILE"
 printf 'COMPUTER_TOKEN=%s\n' "$computer_token" >> "$ENV_FILE"
 chown root:opendots-harness "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
+printf 'COMPUTER_TOKEN=%s\n' "$computer_token" > "$COMPUTER_ENV_FILE"
+chown root:root "$COMPUTER_ENV_FILE"
+chmod 0600 "$COMPUTER_ENV_FILE"
 python3 - "$APP_DIR/.env" "$computer_token" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -66,9 +71,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=opendots-harness
-Group=opendots-harness
-EnvironmentFile=$ENV_FILE
+User=opendots-computer
+Group=opendots-computer
+EnvironmentFile=$COMPUTER_ENV_FILE
 Environment=COMPUTER_BROWSER_BACKEND=local-chrome
 Environment=COMPUTER_BROWSER_MODE=headed
 Environment=PORT=4101
