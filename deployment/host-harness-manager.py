@@ -516,6 +516,15 @@ class Handler(BaseHTTPRequestHandler):
                 result = json.loads(error.read())
             except ValueError:
                 result = {"error": "Local computer request failed"}
+            if starting:
+                try:
+                    probe = urllib.request.Request(f"{LOCAL_COMPUTER_URL.rstrip('/')}/health", headers={"Authorization": f"Bearer {LOCAL_COMPUTER_TOKEN}", "x-openbot-bot-id": dot_id})
+                    with urllib.request.urlopen(probe, timeout=10) as response:
+                        health = json.loads(response.read())
+                    if health.get("browser"):
+                        return self.reply(200, {"botId": dot_id, "container": f"opendots-computer-{dot_id}", "status": "running", "url": f"http://{HOST}:{PORT}/computer/{dot_id}/api"})
+                except Exception:
+                    pass
             return self.reply(error.code, result)
         except Exception:
             return self.reply(502, {"error": "Local computer service is unavailable"})
